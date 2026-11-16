@@ -11,7 +11,7 @@
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
   font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Malgun Gothic",sans-serif;-webkit-tap-highlight-color:transparent}
 button{font-family:inherit;cursor:pointer;color:var(--fg)}
-#map{position:absolute;inset:0}
+#map{position:absolute;inset:0;touch-action:none}  /* 브라우저가 터치 끌기를 스크롤로 가져가지 않게 */
 .hidden{display:none!important}
 
 /* 상단 회전 안내 */
@@ -101,6 +101,7 @@ button{font-family:inherit;cursor:pointer;color:var(--fg)}
   <div class="note">
     · 현재 위치는 길찾기·검색을 위해 카카오로만 전달되고, 다른 서버로 보내지 않습니다.<br>
     · 오늘 길찾기 호출: <b id="callCount">0</b>회 (무료 한도 하루 10,000회)<br>
+    · 지도 터치 수신 (분석용): <span id="evInfo">-</span><br>
     · 버전 <span id="ver"></span> · <a href="phase0/" style="color:#8ab4f8">위치 측정 페이지(Phase 0)</a>
   </div>
 </div>
@@ -115,7 +116,7 @@ window.__sdkError = false;
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-17.3';
+const VERSION = 'p1-2026-11-17.4';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 
@@ -196,9 +197,9 @@ function initMap() {
   meEl.innerHTML = '<svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="#fff"/><circle cx="22" cy="22" r="17" fill="#1a73e8"/>' +
                    '<path d="M22 8 L31 30 L22 25 L13 30 Z" fill="#fff"/></svg>';
   meOverlay = new kakao.maps.CustomOverlay({ content: meEl, position: center, xAnchor: 0.5, yAnchor: 0.5, zIndex: 10 });
-  kakao.maps.event.addListener(map, 'dragstart', () => setFollow(false));
-  kakao.maps.event.addListener(map, 'zoom_start', () => { lastTouch = Date.now(); });
-  watchTouch($('map'));
+  // 카카오 기본 끌기·확대는 끄고 앱이 직접 처리 (아래 '지도 조작' 참고)
+  map.setDraggable(false); map.setZoomable(false);
+  gestures($('map'));
   startGeo();
 }
 function setFollow(on) {
@@ -207,34 +208,80 @@ function setFollow(on) {
 }
 $('recenter').onclick = () => setFollow(true);
 
-// 손가락이 지도에 닿아 있는 동안엔 지도를 자동으로 옮기지 않음.
-// (v1.2까지는 따라가기 중 약 1초마다 setCenter가 불려 끌기·핀치 확대가 덮어써짐 — 2026-11-17 실차 "이동·확대 안 됨")
-let touching = 0, lastTouch = 0, downAt = null;
-function watchTouch(el) {
-  const opt = { capture: true, passive: true };
-  const down = (x, y) => { touching++; lastTouch = Date.now(); downAt = { x, y }; };
-  const up = () => { touching = Math.max(0, touching - 1); lastTouch = Date.now(); if (!touching) downAt = null; };
-  const move = (x, y) => {
-    lastTouch = Date.now();
-    // 카카오 dragstart가 안 오는 경우 대비: 10px 넘게 끌면 따라가기 해제
-    if (downAt && follow && Math.hypot(x - downAt.x, y - downAt.y) > 10) setFollow(false);
+// ---------- 지도 조작 (끌기·두 손가락 확대) ----------
+// 2026-11-17 실차(v1.3): 테슬라 브라우저에서 터치 끌기·핀치가 모두 안 됨.
+// 추정 원인: 테슬라 브라우저가 데스크톱으로 인식돼 카카오 지도가 마우스 조작만 받고,
+// 터치 끌기는 브라우저가 스크롤 동작으로 가져감. -> 카카오 기본 조작을 끄고 포인터/터치 이벤트로 직접 처리.
+// 손가락이 닿아 있는 동안과 뗀 뒤 1.5초는 따라가기 자동 이동을 멈춤.
+let touching = 0, lastTouch = 0;
+const evCount = { pointer: 0, touch: 0, mouse: 0 };   // 실차 분석용 (설정 화면에 표시)
+function gestures(el) {
+  const pts = new Map();          // 닿아 있는 손가락: id -> {x, y}
+  let start = null;               // 시작 시점 정보 (끌기 판정·핀치 기준 거리)
+  let pendDx = 0, pendDy = 0, raf = 0;
+  const center2 = () => { const a = [...pts.values()]; return { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2, d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) }; };
+  const flush = () => {
+    raf = 0;
+    if (!pendDx && !pendDy) return;
+    const w = el.clientWidth / 2, h = el.clientHeight / 2;
+    const c = map.getProjection().coordsFromContainerPoint(new kakao.maps.Point(w - pendDx, h - pendDy));
+    pendDx = pendDy = 0;
+    map.setCenter(c);
   };
-  if ('PointerEvent' in window) {
-    el.addEventListener('pointerdown', e => down(e.clientX, e.clientY), opt);
-    el.addEventListener('pointermove', e => move(e.clientX, e.clientY), opt);
-    // 손을 버튼 위에서 떼도 놓치지 않도록 window에서 받음
-    ['pointerup', 'pointercancel'].forEach(t => window.addEventListener(t, up, opt));
-  } else {
-    el.addEventListener('touchstart', e => down(e.touches[0].clientX, e.touches[0].clientY), opt);
-    el.addEventListener('touchmove', e => move(e.touches[0].clientX, e.touches[0].clientY), opt);
-    ['touchend', 'touchcancel'].forEach(t => window.addEventListener(t, e => { touching = e.touches.length + 1; up(); }, opt));
+  const panBy = (dx, dy) => { pendDx += dx; pendDy += dy; if (!raf) raf = requestAnimationFrame(flush); };
+  const reset = () => {
+    start = null;
+    if (pts.size === 1) { const p = [...pts.values()][0]; start = { x: p.x, y: p.y, dragging: false }; }
+    if (pts.size === 2) { start = { pinch: center2().d, dragging: true }; }
+  };
+  function down(id, x, y) {
+    pts.set(id, { x, y }); touching = pts.size; lastTouch = Date.now(); reset();
   }
-  el.addEventListener('wheel', () => { lastTouch = Date.now(); }, opt);
+  function move(id, x, y) {
+    const p = pts.get(id); if (!p) return;
+    lastTouch = Date.now();
+    if (pts.size === 1 && start) {
+      if (!start.dragging && Math.hypot(x - start.x, y - start.y) > 10) { start.dragging = true; setFollow(false); }
+      if (start.dragging) panBy(x - p.x, y - p.y);
+      p.x = x; p.y = y;
+    } else if (pts.size === 2 && start) {
+      const before = center2(); p.x = x; p.y = y; const after = center2();
+      if (!follow) panBy(after.x - before.x, after.y - before.y);
+      const r = after.d / start.pinch;
+      if (r > 1.5 || r < 0.67) { zoomBy(r > 1 ? -1 : 1); start.pinch = after.d; }
+    }
+  }
+  function up(id) {
+    if (!pts.delete(id)) return;
+    touching = pts.size; lastTouch = Date.now(); reset();
+  }
+  if ('PointerEvent' in window) {
+    el.addEventListener('pointerdown', e => {
+      evCount.pointer++; if (e.pointerType === 'mouse' && e.button !== 0) return;
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      down(e.pointerId, e.clientX, e.clientY);
+    });
+    el.addEventListener('pointermove', e => move(e.pointerId, e.clientX, e.clientY));
+    ['pointerup', 'pointercancel'].forEach(t => window.addEventListener(t, e => up(e.pointerId)));
+  } else {
+    const each = (e, f) => { for (const t of e.changedTouches) f(t.identifier, t.clientX, t.clientY); };
+    el.addEventListener('touchstart', e => { evCount.touch++; each(e, down); }, { passive: true });
+    el.addEventListener('touchmove', e => { e.preventDefault(); each(e, move); }, { passive: false });
+    ['touchend', 'touchcancel'].forEach(t => window.addEventListener(t, e => each(e, up)));
+  }
+  el.addEventListener('touchstart', () => { if ('PointerEvent' in window) evCount.touch++; }, { passive: true });
+  el.addEventListener('mousedown', () => evCount.mouse++);
+  // PC 마우스 휠
+  let wheelAt = 0;
+  el.addEventListener('wheel', e => {
+    e.preventDefault(); const now = Date.now(); if (now - wheelAt < 250) return; wheelAt = now;
+    zoomBy(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
 }
 function zoomBy(d) {
   lastTouch = Date.now();
-  map.setLevel(Math.min(14, Math.max(1, map.getLevel() + d)), { animate: true });
-  if (follow && pos) setTimeout(() => map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng)), 350);
+  map.setLevel(Math.min(14, Math.max(1, map.getLevel() + d)));
+  if (follow && pos) map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng));
 }
 $('zoomIn').onclick = () => zoomBy(-1);
 $('zoomOut').onclick = () => zoomBy(1);
@@ -419,6 +466,8 @@ function openSettings() {
   const k = restKey();
   $('restKey').value = '';
   $('keyState').textContent = k ? '저장된 키: ' + k.slice(0, 4) + '…' + k.slice(-4) : '저장된 키 없음';
+  $('evInfo').textContent = 'pointer ' + evCount.pointer + ' / touch ' + evCount.touch + ' / mouse ' + evCount.mouse +
+    ' · 터치 지원 ' + (navigator.maxTouchPoints || 0) + '점';
   $('callCount').textContent = ls.get('nav.calls', { n: 0 }).d === new Date().toDateString() ? ls.get('nav.calls').n : 0;
 }
 $('btnSettings').onclick = openSettings;
