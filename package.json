@@ -1,0 +1,11 @@
+{
+  "name": "tesla-navi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

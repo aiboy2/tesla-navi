@@ -20,6 +20,12 @@
 (아직 없음)
 
 ## 결정 기록
+### 2026-11-16 (운영 체계)
+- 역할 분담: 사용자는 실측·요청·결정, Claude는 설계안·구현·검증·배포·기록을 끝까지 담당 (CLAUDE.md "운영 절차")
+- 자동 검증: `npm test` (jsdom + 가짜 geolocation, 22개 항목). 일부러 버그를 넣었을 때 실패하는 것을 확인함. 실제 GPS 동작은 검증 범위 밖
+- 배포 절차 `/ship`, 실측 기록·판정 절차 `/record-test` (`.claude/skills/`). 판정 기준표는 record-test에 있음
+- 로컬 SessionStart 훅이 `git pull --ff-only` 자동 실행 (`.claude/settings.json`)
+
 ### 2026-11-16
 - 측정 모드를 A 단독 / B 단독 / A+B로 분리. 이유: Chromium 계열은 두 호출이 같은 위치 제공자를 공유할 수 있어, 동시에 돌리면 B가 A의 갱신을 부풀려 가설 B(watchPosition 미지원)를 판별할 수 없음
 - B(getCurrentPosition 주기)는 응답 후 다음 요청을 예약 → 요청 겹침 방지. 콜백이 timeout+5초 안에 안 오면 "콜백 없음"으로 기록 후 다음 요청
