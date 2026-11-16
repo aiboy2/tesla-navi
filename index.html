@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#111214;--panel:rgba(22,23,26,.94);--panel2:#2a2b30;--fg:#f4f4f5;--dim:#a1a1aa;--acc:#1a73e8;--ok:#34c759;--warn:#ffcc00;--err:#ff453a;--line:#3a3b40}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--fg);
+html,body{margin:0;height:100%;overflow:hidden;background:#ebe8e1;color:var(--fg);
   font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Malgun Gothic",sans-serif;-webkit-tap-highlight-color:transparent}
 button{font-family:inherit;cursor:pointer;color:var(--fg)}
 #map{position:absolute;inset:0;touch-action:none}  /* 브라우저가 터치 끌기를 스크롤로 가져가지 않게 */
@@ -116,7 +116,7 @@ window.__sdkError = false;
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-17.4';
+const VERSION = 'p1-2026-11-17.5';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 
@@ -215,45 +215,81 @@ $('recenter').onclick = () => setFollow(true);
 // 손가락이 닿아 있는 동안과 뗀 뒤 1.5초는 따라가기 자동 이동을 멈춤.
 let touching = 0, lastTouch = 0;
 const evCount = { pointer: 0, touch: 0, mouse: 0 };   // 실차 분석용 (설정 화면에 표시)
+// 부드럽게: 손가락이 움직이는 동안엔 카카오 지도를 다시 그리지 않고 지금 화면을 CSS transform으로 밀고/늘이기만 함.
+// 손을 떼면 확대 배율을 가까운 지도 단계(2배 단위)로 맞춘 뒤 카카오에 한 번만 반영(setLevel/setCenter).
+// (v1.4는 움직일 때마다 setCenter·setLevel을 불러 끌기가 뚝뚝 끊기고 확대가 다시 그려지는 느낌 — 2026-11-17 실차)
 function gestures(el) {
-  const pts = new Map();          // 닿아 있는 손가락: id -> {x, y}
-  let start = null;               // 시작 시점 정보 (끌기 판정·핀치 기준 거리)
-  let pendDx = 0, pendDy = 0, raf = 0;
-  const center2 = () => { const a = [...pts.values()]; return { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2, d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) }; };
-  const flush = () => {
-    raf = 0;
-    if (!pendDx && !pendDy) return;
-    const w = el.clientWidth / 2, h = el.clientHeight / 2;
-    const c = map.getProjection().coordsFromContainerPoint(new kakao.maps.Point(w - pendDx, h - pendDy));
-    pendDx = pendDy = 0;
-    map.setCenter(c);
+  const pts = new Map();     // 닿아 있는 손가락: id -> {x, y} (지도 영역 기준 좌표)
+  let g = null;              // 진행 중 제스처: f0(원래 화면의 기준점), f1(지금 손가락 기준점), s(배율), base/d0(핀치 기준)
+  let settleTm = 0, origin = { x: 0, y: 0 };
+  const W = () => el.clientWidth, H = () => el.clientHeight;
+  const focus = () => {
+    const a = [...pts.values()];
+    if (a.length === 1) return { x: a[0].x, y: a[0].y, d: 0 };
+    return { x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2, d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y) };
   };
-  const panBy = (dx, dy) => { pendDx += dx; pendDy += dy; if (!raf) raf = requestAnimationFrame(flush); };
-  const reset = () => {
-    start = null;
-    if (pts.size === 1) { const p = [...pts.values()][0]; start = { x: p.x, y: p.y, dragging: false }; }
-    if (pts.size === 2) { start = { pinch: center2().d, dragging: true }; }
+  const paint = (anim) => {
+    el.style.transition = anim ? 'transform 150ms ease-out' : 'none';
+    el.style.transform = 'translate(' + (g.f1.x - g.s * g.f0.x) + 'px,' + (g.f1.y - g.s * g.f0.y) + 'px) scale(' + g.s + ')';
   };
+  // 손가락 수가 바뀌면 지금 보이는 화면이 그대로 이어지도록 기준점을 다시 잡음
+  const rebase = () => {
+    if (!pts.size) return;
+    const f = focus();
+    const f1 = follow ? { x: W() / 2, y: H() / 2 } : f;   // 따라가기 중엔 내 위치(화면 중앙) 기준으로만 확대
+    if (!g) g = { f0: { ...f1 }, f1, s: 1, base: 1, d0: f.d, moved: false };
+    else { g.f0 = { x: g.f0.x + (f1.x - g.f1.x) / g.s, y: g.f0.y + (f1.y - g.f1.y) / g.s }; g.f1 = f1; g.base = g.s; g.d0 = f.d; }
+    g.start = { x: f.x, y: f.y };
+  };
+  function commit() {
+    clearTimeout(settleTm); settleTm = 0;
+    if (!g) return;
+    const k = g.k || 0, s = g.s;
+    // 화면 중앙에 보이는 지점이 원래 지도에서 어디였는지 -> 새 중심
+    const q = { x: g.f0.x + (W() / 2 - g.f1.x) / s, y: g.f0.y + (H() / 2 - g.f1.y) / s };
+    const c = map.getProjection().coordsFromContainerPoint(new kakao.maps.Point(q.x, q.y));
+    g = null;
+    el.style.transition = 'none'; el.style.transform = ''; el.style.willChange = '';
+    if (k) map.setLevel(map.getLevel() - k);
+    if (follow && pos) map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng)); else map.setCenter(c);
+  }
+  function finish() {
+    if (!g) return;
+    if (!g.moved && g.s === 1) { g = null; el.style.transform = ''; return; }
+    // 배율을 지도 단계(2배 단위)로 맞춤. 레벨 1~14 범위
+    const lv = map.getLevel();
+    let k = Math.round(Math.log2(g.s));
+    k = Math.max(lv - 14, Math.min(lv - 1, k));
+    g.k = k; g.s = Math.pow(2, k);
+    paint(true);
+    settleTm = setTimeout(commit, 160);
+  }
   function down(id, x, y) {
-    pts.set(id, { x, y }); touching = pts.size; lastTouch = Date.now(); reset();
+    if (settleTm) commit();
+    if (!pts.size) { const r = el.getBoundingClientRect(); origin = { x: r.left, y: r.top }; }
+    pts.set(id, { x: x - origin.x, y: y - origin.y }); touching = pts.size; lastTouch = Date.now();
+    if (pts.size <= 2) rebase();
   }
   function move(id, x, y) {
-    const p = pts.get(id); if (!p) return;
-    lastTouch = Date.now();
-    if (pts.size === 1 && start) {
-      if (!start.dragging && Math.hypot(x - start.x, y - start.y) > 10) { start.dragging = true; setFollow(false); }
-      if (start.dragging) panBy(x - p.x, y - p.y);
-      p.x = x; p.y = y;
-    } else if (pts.size === 2 && start) {
-      const before = center2(); p.x = x; p.y = y; const after = center2();
-      if (!follow) panBy(after.x - before.x, after.y - before.y);
-      const r = after.d / start.pinch;
-      if (r > 1.5 || r < 0.67) { zoomBy(r > 1 ? -1 : 1); start.pinch = after.d; }
+    const p = pts.get(id); if (!p || !g) return;
+    p.x = x - origin.x; p.y = y - origin.y; lastTouch = Date.now();
+    const f = focus();
+    if (pts.size === 1) {
+      if (!g.moved && Math.hypot(f.x - g.start.x, f.y - g.start.y) < 10) return;   // 탭은 무시
+      if (!g.moved && follow) { setFollow(false); g.f0 = { x: g.start.x, y: g.start.y }; g.f1 = { x: g.start.x, y: g.start.y }; }
+      g.moved = true; g.f1 = { x: f.x, y: f.y };
+    } else {
+      g.moved = true;
+      if (g.d0 > 0) g.s = Math.max(1 / 16, Math.min(16, g.base * f.d / g.d0));
+      if (!follow) g.f1 = { x: f.x, y: f.y };
     }
+    el.style.willChange = 'transform';
+    paint(false);
   }
   function up(id) {
     if (!pts.delete(id)) return;
-    touching = pts.size; lastTouch = Date.now(); reset();
+    touching = pts.size; lastTouch = Date.now();
+    if (pts.size) rebase(); else finish();
   }
   if ('PointerEvent' in window) {
     el.addEventListener('pointerdown', e => {
@@ -278,10 +314,14 @@ function gestures(el) {
     zoomBy(e.deltaY > 0 ? 1 : -1);
   }, { passive: false });
 }
+// 버튼·휠 확대: 카카오 확대 애니메이션 사용. 따라가기 중엔 내 위치를 기준점으로
 function zoomBy(d) {
   lastTouch = Date.now();
-  map.setLevel(Math.min(14, Math.max(1, map.getLevel() + d)));
-  if (follow && pos) map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng));
+  const lv = Math.min(14, Math.max(1, map.getLevel() + d));
+  if (lv === map.getLevel()) return;
+  const opt = { animate: { duration: 250 } };
+  if (follow && pos) opt.anchor = new kakao.maps.LatLng(pos.lat, pos.lng);
+  map.setLevel(lv, opt);
 }
 $('zoomIn').onclick = () => zoomBy(-1);
 $('zoomOut').onclick = () => zoomBy(1);
