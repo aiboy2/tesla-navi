@@ -13,7 +13,30 @@
 - [x] A+B 측정 — A 단독이 잘 되므로 생략
 - [x] 사용자 확인: 권한 팝업 재등장 없음 (③ 통과)
 - [ ] (선택) 측정 페이지 보완: 위치 나이를 timestamp 단위 무관하게 계산, 간격 3초 초과 횟수와 반복이 정차 중인지 구분 표시 → 장거리(10분+, 고속도로/터널) 재측정
-- [ ] Phase 1 계획안 논의 (위치 소스는 watchPosition 전제)
+- [x] Phase 1 API 조사 (아래 "Phase 1 API 조사")
+- [ ] Phase 1 지도/길찾기 제공사 결정 → 계획 확정
+
+## Phase 1 API 조사 (2026-11-17)
+배경: 사용자는 네이버를 선호했으나, 순정 내비에 없는 기능(차선 안내 등)이 핵심 동기. 길찾기 키는 "차량 화면에서 1회 입력(브라우저에만 저장)" 방식으로 결정 → **브라우저에서 직접 호출(CORS)이 가능해야 함**
+
+| | 네이버 (NCP Directions 5) | 카카오모빌리티 길찾기 | TMAP (SK open API `/tmap/routes`) |
+|---|---|---|---|
+| 브라우저 직접 호출(CORS) | **불가** (preflight에 허용 헤더 없음, 직접 확인) → 프록시 필수 | 가능 (Origin 허용, 직접 확인) | 가능 (`*` 허용, 직접 확인) |
+| 차선 정보 | 없음 (guide에 분기점 안내만) | 확인 안 됨 (공식 문서 접근 실패, 검색상 없음) | **부분적**: 안내점 `turnType` 52 왼쪽 차선, 53 오른쪽 차선, 54~63 1~10차선. 차선 그림 아님, 실제 응답에 얼마나 자주 나오는지 미확인 |
+| 주의 구간 | 없음 | 없음 | `turnType` 191 제한속도, 192 사고다발, 193 급커브, 194 낙석 |
+| 단속 카메라 | 없음 | 없음 | 없음 → 공통으로 공공데이터 [전국무인교통단속카메라표준데이터](https://www.data.go.kr/data/15028200/standard.do) 사용 (브라우저 내 계산) |
+| 교통 반영 | O (section 정체도) | O (roads traffic_state) | O (trafficInfo=Y) |
+| 무료량 | 2025-07부터 무료 종료, 건당 약 5원으로 보임 (콘솔 확인 필요) | 하루 10,000건 (비상업) | 경로 하루 1,000건, POI 검색 하루 20,000건 |
+| 약관 메모 | 미확인 | 상업적 이용은 사전 제휴 필요 | 받은 데이터 24시간 이상 저장 금지. 타사 지도 표시 제한 조항은 없음. "내비게이션 길 안내"가 별도 상품으로 있어 우리 용도 해당 여부 모호 |
+| 지도 표시 JS | O | O (카카오맵) | O (Tmapv2) |
+
+결론(잠정):
+- 공개 API 중 차선 관련 정보를 주는 곳은 TMAP뿐 (텍스트 수준). 네이버·카카오는 차선 정보 없음
+- 단속 카메라는 어느 API도 안 줌 → 공공데이터로 직접 구현 (위치 외부 전송 없음)
+- 네이버는 길찾기 CORS 불가 + 유료로 "차량에서 키 1회 입력" 방식과 맞지 않음. 네이버는 **지도 표시용**으로만 쓰는 조합 가능 (지도 JS는 브라우저 동작)
+- 다음 확인: TMAP 앱키로 실제 경로 몇 개를 호출해 차선 코드(52~63)가 얼마나 나오는지 실측. 네이버 지도 위에 TMAP 데이터를 표시해도 되는지 네이버 약관 확인
+
+출처: [NCP Directions 5](https://api.ncloud-docs.com/docs/application-maps-directions5), [NCP 요금 공지](https://www.gov-ncloud.com/support/notice/all/528), [카카오 쿼터](https://developers.kakao.com/docs/latest/ko/getting-started/quota), [TMAP 경로안내 샘플/코드표](https://tmap-skopenapi.readme.io/reference/%EA%B2%BD%EB%A1%9C%EC%95%88%EB%82%B4-%EC%83%98%ED%94%8C%EC%98%88%EC%A0%9C), [TMAP 약관](https://tmapapi.tmapmobility.com/terms.html), [SK open API 요금제](https://openapi.sk.com/products/calc?svcSeq=4&menuSeq=5)
 
 ## 테스트 결과
 
