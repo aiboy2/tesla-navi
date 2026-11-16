@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
-const HTML = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(new URL('../phase0/index.html', import.meta.url), 'utf8');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 let failed = 0, passed = 0;
 function check(name, cond, detail) {
@@ -46,7 +46,7 @@ async function load(settings, geoOpts) {
   const vc = new VirtualConsole();
   vc.on('jsdomError', e => errors.push(String(e.message)));
   const dom = new JSDOM(HTML, {
-    url: 'https://aiboy2.github.io/tesla-navi/',
+    url: 'https://aiboy2.github.io/tesla-navi/phase0/',
     runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
       Object.defineProperty(w.navigator, 'geolocation', { value: geo, configurable: true });
@@ -132,7 +132,7 @@ console.log('[A+B 동시, 새로고침 후 이전 세션 복원]');
   // 같은 localStorage로 다시 로드
   const saved = t.w.localStorage.getItem('p0.session');
   t.w.close();
-  const dom = new JSDOM(HTML, { url: 'https://aiboy2.github.io/tesla-navi/', runScripts: 'dangerously',
+  const dom = new JSDOM(HTML, { url: 'https://aiboy2.github.io/tesla-navi/phase0/', runScripts: 'dangerously',
     beforeParse(w) { w.localStorage.setItem('p0.session', saved); } });
   await sleep(20);
   const d = dom.window.document;
