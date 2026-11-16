@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache">
+<title>위치 검증 Phase 0</title>
+<style>
+:root{--bg:#111214;--panel:#1c1d20;--panel2:#26272b;--fg:#f2f2f2;--dim:#9a9ca3;--ok:#34c759;--warn:#ffcc00;--err:#ff453a;--acc:#0a84ff;--line:#34363b}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Malgun Gothic",sans-serif;font-size:18px;-webkit-tap-highlight-color:transparent}
+button{font-family:inherit;cursor:pointer}
+header{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line)}
+h1{font-size:20px;margin:0}
+.ver{color:var(--dim);font-size:14px}
+.grp{display:flex;align-items:center;gap:6px}
+.grp>span{color:var(--dim);font-size:15px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{background:transparent;color:var(--fg);border:0;border-left:1px solid var(--line);padding:12px 14px;font-size:18px;min-width:52px}
+.seg button:first-child{border-left:0}
+.seg button.on{background:var(--acc);color:#fff;font-weight:700}
+.seg.locked{opacity:.45;pointer-events:none}
+.big{font-size:22px;padding:14px 30px;border-radius:12px;border:0;font-weight:700}
+#startBtn{background:var(--ok);color:#000}
+#startBtn.running{background:var(--err);color:#fff}
+.sub{font-size:17px;padding:12px 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--fg)}
+.sub:disabled{opacity:.4}
+.spacer{flex:1}
+#clock{font-size:22px;font-variant-numeric:tabular-nums}
+main{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 16px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+.panel{background:var(--panel);border-radius:14px;padding:14px 16px;border:2px solid transparent}
+.panel.off{opacity:.35}
+.panel.live{border-color:var(--ok)}
+.panel.bad{border-color:var(--err)}
+.phead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.phead h2{font-size:20px;margin:0}
+.badge{font-size:15px;padding:4px 10px;border-radius:8px;background:var(--panel2);color:var(--dim)}
+.coord{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25;word-break:break-all}
+.accline{font-size:30px;font-weight:700;margin:4px 0 10px}
+.accline small{font-size:18px;color:var(--dim);font-weight:400}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kv div{background:var(--panel2);border-radius:10px;padding:8px 10px}
+.kv b{display:block;font-size:24px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv span{font-size:13px;color:var(--dim)}
+.errbox{margin-top:8px;font-size:18px;color:var(--err);min-height:24px}
+.g{color:var(--ok)}.y{color:var(--warn)}.r{color:var(--err)}
+footer{padding:0 16px 16px}
+.status{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--dim);font-size:16px;margin-bottom:8px}
+.status b{color:var(--fg);font-weight:600}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+#log td,#log th{padding:4px 8px;border-bottom:1px solid var(--line);font-size:15px;text-align:left;white-space:nowrap}
+#log th{color:var(--dim);font-weight:400}
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;overflow:auto;padding:16px;z-index:10}
+#overlay.show{display:block}
+#sumBox{max-width:1200px;margin:0 auto;background:var(--panel);border-radius:14px;padding:16px 20px}
+#sumBox h2{margin:0 0 6px;font-size:24px}
+#sumMeta{color:var(--dim);font-size:16px;margin-bottom:10px;line-height:1.5}
+#sumTable td,#sumTable th{padding:8px 10px;border-bottom:1px solid var(--line);font-size:20px;text-align:left}
+#sumTable th{color:var(--dim);font-weight:400;font-size:16px}
+#sumTable td:first-child{color:var(--dim);font-size:17px}
+.note{color:var(--dim);font-size:14px;margin-top:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>위치 검증 Phase 0</h1>
+  <span class="ver" id="ver"></span>
+  <div class="grp"><span>모드</span><div class="seg" data-key="mode">
+    <button data-v="A">A 단독</button><button data-v="B">B 단독</button><button data-v="AB">A+B</button></div></div>
+  <div class="grp"><span>B 주기</span><div class="seg" data-key="interval">
+    <button data-v="1000">1초</button><button data-v="2000">2초</button><button data-v="5000">5초</button></div></div>
+  <div class="grp"><span>고정밀</span><div class="seg" data-key="high">
+    <button data-v="1">ON</button><button data-v="0">OFF</button></div></div>
+  <div class="grp"><span>maximumAge</span><div class="seg" data-key="maxAge">
+    <button data-v="0">0</button><button data-v="10000">10초</button></div></div>
+  <div class="grp"><span>timeout</span><div class="seg" data-key="timeout">
+    <button data-v="5000">5초</button><button data-v="10000">10초</button></div></div>
+  <div class="spacer"></div>
+  <span id="clock">00:00</span>
+  <button class="big" id="startBtn">시작</button>
+</header>
+
+<main>
+  <section class="panel" id="pA">
+    <div class="phead"><h2>A · watchPosition</h2><span class="badge" id="A-badge">대기</span></div>
+    <div class="coord" id="A-lat">—</div>
+    <div class="coord" id="A-lng">—</div>
+    <div class="accline">정확도 <span id="A-acc">—</span> <small>m</small></div>
+    <div class="kv">
+      <div><b id="A-count">0</b><span>갱신 횟수</span></div>
+      <div><b id="A-last">—</b><span>마지막 갱신 시각</span></div>
+      <div><b id="A-since">—</b><span>마지막 갱신 후 경과(초)</span></div>
+      <div><b id="A-dt">—</b><span>직전 갱신 간격(초)</span></div>
+      <div><b id="A-age">—</b><span>위치 나이(초) = 지금−timestamp</span></div>
+      <div><b id="A-rep">0</b><span>같은 timestamp 반복</span></div>
+      <div><b id="A-spd">—</b><span>speed (km/h)</span></div>
+      <div><b id="A-dspd">—</b><span>좌표로 계산한 속도 (km/h)</span></div>
+      <div><b id="A-hdg">—</b><span>heading / altitude</span></div>
+      <div><b id="A-errcnt">0</b><span>에러 횟수</span></div>
+      <div><b id="A-lt">—</b><span>(watch는 응답시간 없음)</span></div>
+      <div><b id="A-late">—</b><span>&nbsp;</span></div>
+    </div>
+    <div class="errbox" id="A-err"></div>
+  </section>
+
+  <section class="panel" id="pB">
+    <div class="phead"><h2>B · getCurrentPosition 주기</h2><span class="badge" id="B-badge">대기</span></div>
+    <div class="coord" id="B-lat">—</div>
+    <div class="coord" id="B-lng">—</div>
+    <div class="accline">정확도 <span id="B-acc">—</span> <small>m</small></div>
+    <div class="kv">
+      <div><b id="B-count">0</b><span>갱신 횟수</span></div>
+      <div><b id="B-last">—</b><span>마지막 갱신 시각</span></div>
+      <div><b id="B-since">—</b><span>마지막 갱신 후 경과(초)</span></div>
+      <div><b id="B-dt">—</b><span>직전 갱신 간격(초)</span></div>
+      <div><b id="B-age">—</b><span>위치 나이(초) = 지금−timestamp</span></div>
+      <div><b id="B-rep">0</b><span>같은 timestamp 반복</span></div>
+      <div><b id="B-spd">—</b><span>speed (km/h)</span></div>
+      <div><b id="B-dspd">—</b><span>좌표로 계산한 속도 (km/h)</span></div>
+      <div><b id="B-hdg">—</b><span>heading / altitude</span></div>
+      <div><b id="B-errcnt">0</b><span>에러 횟수</span></div>
+      <div><b id="B-lt">—</b><span>응답시간 (ms)</span></div>
+      <div><b id="B-late">0</b><span>콜백 없음 / 늦은 콜백</span></div>
+    </div>
+    <div class="errbox" id="B-err"></div>
+  </section>
+</main>
+
+<footer>
+  <div class="status">
+    <span>권한: <b id="perm">확인 중</b></span>
+    <span>화면 숨김: <b id="hid">0회</b></span>
+    <span>화면 꺼짐 방지: <b id="wake">—</b></span>
+    <span>로그: <b id="logn">0</b>건</span>
+    <span class="spacer"></span>
+    <button class="sub" id="sumBtn" disabled>요약 보기</button>
+    <button class="sub" id="clearBtn">로그 지우기</button>
+  </div>
+  <table id="log"><thead><tr><th>시각</th><th>소스</th><th>결과</th><th>정확도 m</th><th>위치 나이 s</th><th>간격 s</th><th>speed km/h</th><th>응답 ms</th></tr></thead><tbody></tbody></table>
+  <div class="note">위치 데이터는 이 브라우저 안(화면, localStorage)에만 남고 어디로도 전송되지 않습니다.</div>
+</footer>
+
+<div id="overlay"><div id="sumBox">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <h2>측정 요약</h2><button class="sub" id="closeSum">닫기</button></div>
+  <div id="sumMeta"></div>
+  <table id="sumTable"></table>
+  <div class="note">이 화면을 폰으로 촬영해 기록하세요.</div>
+</div></div>
+
+<script>
+(function(){
+'use strict';
+var VERSION = 'p0-2026-11-16.1';
+var MAX_ENTRIES = 8000;
+var LS_SET = 'p0.settings', LS_SES = 'p0.session';
+var ERRNAME = {1:'PERMISSION_DENIED',2:'POSITION_UNAVAILABLE',3:'TIMEOUT'};
+
+var $ = function(id){ return document.getElementById(id); };
+$('ver').textContent = VERSION;
+
+function lsGet(k){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); return true; }catch(e){ return false; } }
+
+// ---------- settings ----------
+var S = {mode:'A', interval:2000, high:1, maxAge:0, timeout:10000};
+var saved = lsGet(LS_SET);
+if (saved) for (var k in S) if (saved[k] !== undefined) S[k] = saved[k];
+
+var segs = document.querySelectorAll('.seg');
+function paintSegs(){
+  for (var i=0;i<segs.length;i++){
+    var key = segs[i].getAttribute('data-key'), btns = segs[i].querySelectorAll('button');
+    for (var j=0;j<btns.length;j++){
+      var v = btns[j].getAttribute('data-v');
+      btns[j].classList.toggle('on', String(S[key]) === v);
+    }
+  }
+  $('pA').classList.toggle('off', S.mode === 'B');
+  $('pB').classList.toggle('off', S.mode === 'A');
+}
+for (var i=0;i<segs.length;i++){
+  segs[i].addEventListener('click', function(ev){
+    var b = ev.target.closest('button'); if (!b || running) return;
+    var key = this.getAttribute('data-key'), v = b.getAttribute('data-v');
+    S[key] = (key === 'mode') ? v : Number(v);
+    lsSet(LS_SET, S); paintSegs();
+  });
+}
+paintSegs();
+
+// ---------- helpers ----------
+function pad(n){ return (n<10?'0':'')+n; }
+function hms(t){ var d=new Date(t); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+function f(n,d){ return (n===null||n===undefined||isNaN(n)) ? '—' : Number(n).toFixed(d===undefined?0:d); }
+function hav(a,b){
+  var R=6371000, r=Math.PI/180, dLa=(b.la-a.la)*r, dLo=(b.lo-a.lo)*r;
+  var x=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a.la*r)*Math.cos(b.la*r)*Math.sin(dLo/2)*Math.sin(dLo/2);
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(x)));
+}
+function accClass(a){ return a<=30?'g':(a<=100?'y':'r'); }
+
+// ---------- state ----------
+var running = false, watchId = null, pollTimer = null, wdTimer = null, pending = 0, gen = 0;
+var session = null, live = null, saveTimer = null, wakeLock = null;
+
+function freshLive(){ return {A:{count:0,err:0,rep:0,last:null}, B:{count:0,err:0,rep:0,last:null,nocb:0,late:0}}; }
+live = freshLive();
+
+function opts(){ return {enableHighAccuracy: !!S.high, maximumAge: S.maxAge, timeout: S.timeout}; }
+
+function push(e){
+  if (!session) return;
+  if (session.entries.length < MAX_ENTRIES) session.entries.push(e);
+  else session.truncated = true;
+  $('logn').textContent = session.entries.length + (session.truncated ? ' (상한 도달)' : '');
+  saveSoon();
+  renderLog();
+}
+function saveSoon(){ if (saveTimer) return; saveTimer = setTimeout(function(){ saveTimer=null; saveNow(); }, 3000); }
+function saveNow(){
+  if (!session) return;
+  if (!lsSet(LS_SES, session)) $('logn').textContent += ' (저장 실패)';
+}
+
+// ---------- position handling ----------
+function onPos(src, pos, latency, isLate){
+  var c = pos.coords, now = Date.now(), L = live[src];
+  var e = {s:src, t:now, ok:1, la:c.latitude, lo:c.longitude, ac:c.accuracy,
+           sp:c.speed, hd:c.heading, al:c.altitude, pt:pos.timestamp};
+  if (latency !== null) e.lt = Math.round(latency);
+  if (isLate) e.late = 1;
+  var prev = L.last;
+  if (prev){
+    e.dt = now - prev.t;
+    if (prev.pt === e.pt) e.rep = 1;
+    if (prev.la === e.la && prev.lo === e.lo) e.same = 1;
+    e.d = hav(prev, e);
+    var dp = e.pt - prev.pt;
+    if (dp > 0) e.ds = e.d / (dp/1000) * 3.6;
+  }
+  L.count++; if (e.rep) L.rep++; L.last = e;
+  push(e);
+
+  $(src+'-lat').textContent = f(c.latitude, 6);
+  $(src+'-lng').textContent = f(c.longitude, 6);
+  var acc = $(src+'-acc'); acc.textContent = f(c.accuracy, 0); acc.className = accClass(c.accuracy);
+  $(src+'-count').textContent = L.count;
+  $(src+'-last').textContent = hms(now);
+  $(src+'-dt').textContent = e.dt ? f(e.dt/1000, 1) : '—';
+  $(src+'-age').textContent = f((now - e.pt)/1000, 1);
+  $(src+'-rep').textContent = L.rep;
+  $(src+'-spd').textContent = c.speed === null ? 'null' : f(c.speed*3.6, 1);
+  $(src+'-dspd').textContent = e.ds !== undefined ? f(e.ds, 1) : '—';
+  $(src+'-hdg').textContent = (c.heading===null?'null':f(c.heading,0)) + ' / ' + (c.altitude===null?'null':f(c.altitude,0));
+  if (src === 'B') $('B-lt').textContent = f(latency, 0);
+  $(src+'-err').textContent = '';
+  setBadge(src, '수신 중', 'live');
+}
+
+function onErr(src, err, latency){
+  var L = live[src]; L.err++;
+  var e = {s:src, t:Date.now(), ok:0, code:err.code};
+  if (latency !== null) e.lt = Math.round(latency);
+  push(e);
+  $(src+'-errcnt').textContent = L.err;
+  $(src+'-err').textContent = hms(e.t) + '  code ' + err.code + ' ' + (ERRNAME[err.code]||'') + (err.message ? ' — ' + err.message : '');
+  if (src === 'B') $('B-lt').textContent = f(latency, 0);
+  setBadge(src, '에러 ' + err.code, 'bad');
+}
+
+function setBadge(src, text, cls){
+  $(src+'-badge').textContent = text;
+  var p = $('p'+src); p.classList.remove('live','bad'); if (cls) p.classList.add(cls);
+}
+
+// ---------- A: watchPosition ----------
+function startA(){
+  watchId = navigator.geolocation.watchPosition(
+    function(p){ if (running) onPos('A', p, null, false); },
+    function(er){ if (running) onErr('A', er, null); },
+    opts());
+  setBadge('A', '요청 중', null);
+}
+
+// ---------- B: getCurrentPosition loop (no overlap) ----------
+function pollTick(){
+  if (!running) return;
+  var my = ++gen, t0 = performance.now();
+  pending = my;
+  setBadge('B', live.B.count ? '수신 중' : '요청 중', live.B.count ? 'live' : null);
+  wdTimer = setTimeout(function(){
+    if (pending !== my || !running) return;
+    pending = 0; live.B.nocb++;
+    push({s:'B', t:Date.now(), ok:0, code:'nocb'});
+    updLate();
+    $('B-err').textContent = hms(Date.now()) + '  콜백 없음 (timeout+5초 경과) → 다음 요청';
+    schedule(0);
+  }, S.timeout + 5000);
+  navigator.geolocation.getCurrentPosition(
+    function(p){ done(my, t0, p, null); },
+    function(er){ done(my, t0, null, er); },
+    opts());
+}
+function done(my, t0, p, er){
+  if (!running) return;
+  var lat = performance.now() - t0, isLate = (pending !== my);
+  if (isLate){ live.B.late++; updLate(); }
+  if (p) onPos('B', p, lat, isLate); else onErr('B', er, lat);
+  if (isLate) return;            // watchdog already scheduled next one
+  pending = 0; clearTimeout(wdTimer);
+  schedule(Math.max(0, S.interval - lat));
+}
+function schedule(d){ clearTimeout(pollTimer); pollTimer = setTimeout(pollTick, d); }
+function updLate(){ $('B-late').textContent = live.B.nocb + ' / ' + live.B.late; }
+
+// ---------- start / stop ----------
+function resetPanels(){
+  ['A','B'].forEach(function(s){
+    ['lat','lng','acc','last','since','dt','age','spd','dspd','hdg','lt'].forEach(function(k){ $(s+'-'+k).textContent='—'; });
+    $(s+'-acc').className=''; $(s+'-count').textContent='0'; $(s+'-rep').textContent='0';
+    $(s+'-errcnt').textContent='0'; $(s+'-err').textContent='';
+    setBadge(s, '대기', null);
+  });
+  $('A-lt').textContent='—'; $('A-late').textContent='—'; updLate();
+}
+
+function start(){
+  if (!('geolocation' in navigator)){ alert('이 브라우저는 Geolocation API를 제공하지 않습니다.'); return; }
+  running = true; live = freshLive(); resetPanels();
+  session = {v:VERSION, start:Date.now(), end:null, settings:JSON.parse(JSON.stringify(S)),
+             ua:navigator.userAgent, entries:[], events:[], truncated:false};
+  logEvent('start');
+  $('startBtn').textContent='정지'; $('startBtn').classList.add('running');
+  for (var i=0;i<segs.length;i++) segs[i].classList.add('locked');
+  if (S.mode !== 'B') startA(); else setBadge('A','비활성',null);
+  if (S.mode !== 'A') pollTick(); else setBadge('B','비활성',null);
+  requestWake();
+  saveNow(); $('sumBtn').disabled = false;
+}
+
+function stop(){
+  running = false;
+  if (watchId !== null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+  clearTimeout(pollTimer); clearTimeout(wdTimer); pending = 0;
+  if (session){ session.end = Date.now(); logEvent('stop'); saveNow(); }
+  $('startBtn').textContent='시작'; $('startBtn').classList.remove('running');
+  for (var i=0;i<segs.length;i++) segs[i].classList.remove('locked');
+  ['A','B'].forEach(function(s){ var b=$(s+'-badge'); if (b.textContent!=='비활성') setBadge(s,'정지',null); });
+  releaseWake();
+  showSummary();
+}
+
+$('startBtn').addEventListener('click', function(){ running ? stop() : start(); });
+
+// ---------- events: visibility, permission, wake lock ----------
+function logEvent(type, extra){
+  if (!session) return;
+  var ev = {t:Date.now(), type:type}; if (extra) ev.x = extra;
+  session.events.push(ev); saveSoon();
+}
+var hidCount = 0;
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden){ hidCount++; $('hid').textContent = hidCount + '회'; }
+  if (running){
+    logEvent(document.hidden ? 'hidden' : 'visible');
+    if (document.hidden) saveNow(); else requestWake();
+  }
+});
+window.addEventListener('pagehide', saveNow);
+
+try{
+  if (navigator.permissions && navigator.permissions.query){
+    navigator.permissions.query({name:'geolocation'}).then(function(p){
+      $('perm').textContent = p.state;
+      p.onchange = function(){ $('perm').textContent = p.state; logEvent('perm', p.state); };
+    }, function(){ $('perm').textContent = '조회 불가'; });
+  } else $('perm').textContent = 'Permissions API 없음';
+}catch(e){ $('perm').textContent = '조회 불가'; }
+
+function requestWake(){
+  if (!('wakeLock' in navigator)){ $('wake').textContent = '미지원'; return; }
+  navigator.wakeLock.request('screen').then(function(w){
+    wakeLock = w; $('wake').textContent = '켜짐';
+    w.addEventListener('release', function(){ $('wake').textContent = '해제됨'; });
+  }, function(){ $('wake').textContent = '실패'; });
+}
+function releaseWake(){ if (wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock = null; } }
+
+// ---------- clock / since ticker ----------
+setInterval(function(){
+  if (!running || !session) return;
+  var s = Math.floor((Date.now()-session.start)/1000);
+  $('clock').textContent = pad(Math.floor(s/60)) + ':' + pad(s%60);
+  ['A','B'].forEach(function(k){
+    var L = live[k]; if (!L.last) return;
+    var sec = (Date.now()-L.last.t)/1000, el = $(k+'-since');
+    el.textContent = f(sec, 0); el.className = sec < 5 ? '' : (sec < 15 ? 'y' : 'r');
+  });
+}, 1000);
+
+// ---------- recent log ----------
+function renderLog(){
+  var rows = session.entries.slice(-15).reverse(), h = '';
+  for (var i=0;i<rows.length;i++){
+    var e = rows[i];
+    h += '<tr><td>'+hms(e.t)+'</td><td>'+e.s+'</td><td>'+
+      (e.ok ? ('OK'+(e.rep?' <span class="y">같은ts</span>':'')+(e.late?' <span class="y">늦음</span>':''))
+            : '<span class="r">'+(e.code==='nocb'?'콜백 없음':'에러 '+e.code)+'</span>')+
+      '</td><td>'+(e.ok?f(e.ac,0):'')+'</td><td>'+(e.ok?f((e.t-e.pt)/1000,1):'')+
+      '</td><td>'+(e.dt?f(e.dt/1000,1):'')+'</td><td>'+(e.ok?(e.sp===null?'null':f(e.sp*3.6,1)):'')+
+      '</td><td>'+(e.lt!==undefined?e.lt:'')+'</td></tr>';
+  }
+  document.querySelector('#log tbody').innerHTML = h;
+}
+
+// ---------- summary ----------
+function stats(a){
+  if (!a.length) return null;
+  var s = a.slice().sort(function(x,y){return x-y;});
+  return {min:s[0], med:s[Math.floor((s.length-1)/2)], max:s[s.length-1], n:s.length};
+}
+function tri(st, d, mul){
+  if (!st) return '—'; mul = mul || 1;
+  return f(st.min*mul,d)+' / '+f(st.med*mul,d)+' / '+f(st.max*mul,d);
+}
+function summarize(src){
+  var es = session.entries.filter(function(e){ return e.s === src; });
+  var ok = es.filter(function(e){ return e.ok; });
+  var errs = {}; es.forEach(function(e){ if (!e.ok) errs[e.code] = (errs[e.code]||0)+1; });
+  var errTxt = Object.keys(errs).map(function(c){ return (c==='nocb'?'콜백없음':'code '+c)+': '+errs[c]; }).join(', ') || '0';
+  var spdN = ok.filter(function(e){ return e.sp !== null && e.sp !== undefined; });
+  var hdgN = ok.filter(function(e){ return e.hd !== null && e.hd !== undefined && !isNaN(e.hd); });
+  var dist = ok.reduce(function(s,e){ return s + (e.d && !e.rep ? e.d : 0); }, 0);
+  return {
+    used: es.length > 0,
+    ok: ok.length, err: errTxt,
+    acc: stats(ok.map(function(e){return e.ac;})),
+    dt: stats(ok.filter(function(e){return e.dt;}).map(function(e){return e.dt;})),
+    age: stats(ok.map(function(e){return e.t - e.pt;})),
+    rep: ok.filter(function(e){return e.rep;}).length,
+    same: ok.filter(function(e){return e.same;}).length,
+    spd: spdN.length, spdMax: spdN.length ? Math.max.apply(null, spdN.map(function(e){return e.sp;}))*3.6 : null,
+    hdg: hdgN.length,
+    dist: dist,
+    lt: stats(ok.filter(function(e){return e.lt!==undefined;}).map(function(e){return e.lt;})),
+    late: es.filter(function(e){return e.late;}).length
+  };
+}
+function showSummary(){
+  if (!session){ session = lsGet(LS_SES); if (!session) return; }
+  var end = session.end || Date.now(), dur = Math.round((end - session.start)/1000);
+  var hidN = 0, hidMs = 0, hidAt = null;
+  session.events.forEach(function(ev){
+    if (ev.type === 'hidden'){ hidN++; hidAt = ev.t; }
+    else if (ev.type === 'visible' && hidAt){ hidMs += ev.t - hidAt; hidAt = null; }
+  });
+  if (hidAt) hidMs += end - hidAt;
+  var st = session.settings;
+  $('sumMeta').innerHTML =
+    '버전 '+session.v+' · '+new Date(session.start).toLocaleString()+' 부터 '+Math.floor(dur/60)+'분 '+(dur%60)+'초'+
+    (session.end ? '' : ' (진행 중)')+'<br>모드 '+st.mode+' · B 주기 '+st.interval/1000+'초 · 고정밀 '+(st.high?'ON':'OFF')+
+    ' · maximumAge '+st.maxAge/1000+'초 · timeout '+st.timeout/1000+'초'+
+    '<br>화면 숨김 '+hidN+'회, 총 '+f(hidMs/1000,0)+'초 · 권한 변경 이벤트 '+
+    session.events.filter(function(e){return e.type==='perm';}).length+'회'+
+    (session.truncated ? ' · <span class="r">로그 상한 도달(이후 기록 누락)</span>' : '');
+  var A = summarize('A'), B = summarize('B');
+  function row(label, fn){ return '<tr><td>'+label+'</td><td>'+(A.used?fn(A):'—')+'</td><td>'+(B.used?fn(B):'—')+'</td></tr>'; }
+  $('sumTable').innerHTML =
+    '<tr><th></th><th>A · watchPosition</th><th>B · getCurrentPosition</th></tr>'+
+    row('성공 횟수', function(x){ return x.ok; })+
+    row('에러', function(x){ return x.err; })+
+    row('정확도 m (최소/중앙/최대)', function(x){ return tri(x.acc,0); })+
+    row('갱신 간격 s (최소/중앙/최대)', function(x){ return tri(x.dt,1,0.001); })+
+    row('위치 나이 s (최소/중앙/최대)', function(x){ return tri(x.age,1,0.001); })+
+    row('같은 timestamp 반복 (캐시 의심)', function(x){ return x.rep+' / '+x.ok; })+
+    row('같은 좌표 반복', function(x){ return x.same+' / '+x.ok; })+
+    row('speed 값 있음 / 최대 km/h', function(x){ return x.spd+' / '+x.ok+' · '+f(x.spdMax,0); })+
+    row('heading 값 있음', function(x){ return x.hdg+' / '+x.ok; })+
+    row('누적 이동거리 km', function(x){ return f(x.dist/1000,2); })+
+    row('응답시간 ms (최소/중앙/최대)', function(x){ return x.lt ? tri(x.lt,0) : '—'; })+
+    row('늦은 콜백', function(x){ return x.late; });
+  $('overlay').classList.add('show');
+}
+$('sumBtn').addEventListener('click', showSummary);
+$('closeSum').addEventListener('click', function(){ $('overlay').classList.remove('show'); });
+$('clearBtn').addEventListener('click', function(){
+  if (running) return;
+  if (!confirm('저장된 측정 로그를 지울까요?')) return;
+  try{ localStorage.removeItem(LS_SES); }catch(e){}
+  session = null; $('logn').textContent='0'; $('sumBtn').disabled = true;
+  document.querySelector('#log tbody').innerHTML=''; resetPanels(); $('clock').textContent='00:00';
+});
+
+// ---------- restore previous session ----------
+var prev = lsGet(LS_SES);
+if (prev && prev.entries){
+  session = prev; $('sumBtn').disabled = false;
+  $('logn').textContent = prev.entries.length + ' (이전 세션)';
+  renderLog();
+}
+})();
+</script>
+</body>
+</html>
