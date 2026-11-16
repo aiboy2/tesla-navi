@@ -84,7 +84,7 @@ button{font-family:inherit;cursor:pointer;color:var(--fg)}
 <div class="sheet hidden" id="settingsSheet">
   <div class="row"><h2>설정</h2><div class="spacer"></div><button class="btn" id="settingsClose" style="min-height:52px">닫기</button></div>
   <div class="sec">카카오 REST API 키 (길찾기용, 이 브라우저에만 저장)</div>
-  <div class="row"><input class="inp" id="restKey" placeholder="REST API 키" autocomplete="off"><button class="btn pri" id="saveKey" style="min-height:60px">저장</button></div>
+  <div class="row"><input class="inp" id="restKey" placeholder="REST API 키" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn pri" id="saveKey" style="min-height:60px">저장</button></div>
   <div class="note" id="keyState"></div>
   <div class="row"><button class="btn" id="voiceTest" style="min-height:60px">음성 테스트</button><button class="btn" id="clearRecent" style="min-height:60px">최근 목적지 지우기</button></div>
   <div class="note">
@@ -104,7 +104,7 @@ window.__sdkError = false;
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-17.1';
+const VERSION = 'p1-2026-11-17.2';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 $('ver').textContent = VERSION;
@@ -348,9 +348,13 @@ function openSettings() {
 $('btnSettings').onclick = openSettings;
 $('settingsClose').onclick = () => show('settingsSheet', false);
 $('saveKey').onclick = () => {
-  const v = $('restKey').value.trim();
-  if (!/^[0-9a-f]{32}$/i.test(v)) { toast('REST API 키 형식이 아닙니다 (영문/숫자 32자)'); return; }
-  ls.set('nav.restKey', v); openSettings(); toast('저장했습니다');
+  const r = N.normalizeKey($('restKey').value);
+  if (!r.ok) {
+    const bad = r.key.replace(/[0-9a-f]/g, '');
+    toast('REST API 키 형식이 아닙니다: ' + r.length + '자 입력됨 (32자 필요)' + (bad ? ', 허용되지 않는 문자 "' + bad.slice(0, 5) + '"' : ''), 7000);
+    return;
+  }
+  ls.set('nav.restKey', r.key); openSettings(); toast('저장했습니다');
 };
 
 // ---------- 화면 꺼짐 방지 ----------

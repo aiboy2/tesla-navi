@@ -78,6 +78,19 @@ console.log('[음성 안내 시점]');
   check('처음부터 120m면 200m 안내 1회', b.check('g2', 120) === 200 && b.check('g2', 110) === null);
 }
 
+console.log('[REST 키 입력 보정]');
+{
+  const K = '0123456789abcdef0123456789abcdef'; // 테스트용 가짜 키
+  check('정상 키', N.normalizeKey(K).ok && N.normalizeKey(K).key === K);
+  check('앞뒤 공백·줄바꿈', N.normalizeKey('  ' + K + '\n').ok);
+  check('중간 공백(자동 띄어쓰기)', N.normalizeKey(K.slice(0, 10) + ' ' + K.slice(10)).ok);
+  check('자동 대문자', N.normalizeKey(K.toUpperCase()).key === K);
+  check('전각 문자', N.normalizeKey(K.replace(/[0-9a-f]/g, c => String.fromCharCode(c.charCodeAt(0) + 0xFEE0))).key === K);
+  check('"KakaoAK " 접두어 붙여넣기', N.normalizeKey('KakaoAK ' + K).ok);
+  check('31자는 거부 + 길이 보고', !N.normalizeKey(K.slice(1)).ok && N.normalizeKey(K.slice(1)).length === 31);
+  check('영문 g 등 다른 문자는 거부', !N.normalizeKey(K.slice(1) + 'g').ok);
+}
+
 console.log('[표시 형식]');
 check('formatDist 347 → 350m', N.formatDist(347) === '350m', N.formatDist(347));
 check('formatDist 42 → 40m', N.formatDist(42) === '40m', N.formatDist(42));

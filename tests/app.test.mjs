@@ -23,6 +23,17 @@ console.log('[정적 검사: 위치는 카카오로만]');
   check('nav-core.js는 네트워크 미사용', !/fetch\(|https?:\/\//.test(CORE));
   check('VERSION 형식', /const VERSION = 'p\d+-\d{4}-\d{2}-\d{2}\.\d+'/.test(HTML));
   check('REST 키를 코드에 하드코딩하지 않음', !/KakaoAK [0-9a-f]{32}/i.test(HTML));
+  // 저장소 추적 파일 전체에서 32자리 16진수(카카오 키 형식)는 공개용 JS 키와 테스트용 가짜 키만 허용
+  const { execSync } = await import('node:child_process');
+  const ALLOWED_KEYS = ['a53568cf2b599d80652c79eba7b6a5ca', '0123456789abcdef0123456789abcdef'];
+  const files = execSync('git ls-files', { cwd: new URL('..', import.meta.url) }).toString().split('\n')
+    .filter(f => f && !f.endsWith('package-lock.json'));
+  const leaks = [];
+  for (const f of files) {
+    const txt = readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+    for (const m of txt.matchAll(/\b[0-9a-f]{32}\b/gi)) if (!ALLOWED_KEYS.includes(m[0].toLowerCase())) leaks.push(f + ':' + m[0].slice(0, 6) + '…');
+  }
+  check('저장소에 비공개 키로 보이는 값 없음', leaks.length === 0, leaks);
 }
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

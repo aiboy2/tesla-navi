@@ -126,6 +126,12 @@ export function createAnnouncer(thresholds = [500, 200, 50]) {
   };
 }
 
+// 휴대폰/차량 키보드 입력 보정: 전각 문자, 공백·줄바꿈, 자동 대문자, "KakaoAK " 접두어 붙여넣기 대응
+export function normalizeKey(raw) {
+  const v = String(raw || '').normalize('NFKC').replace(/^\s*KakaoAK/i, '').replace(/[\s​-‍﻿]+/g, '').toLowerCase();
+  return { key: v, ok: /^[0-9a-f]{32}$/.test(v), length: v.length };
+}
+
 export function formatDist(m) {
   if (m == null || isNaN(m)) return '—';
   if (m < 1000) return (m < 100 ? Math.round(m / 5) * 5 : Math.round(m / 10) * 10) + 'm';
