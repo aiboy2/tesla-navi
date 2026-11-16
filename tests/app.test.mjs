@@ -22,6 +22,9 @@ console.log('[정적 검사: 위치는 카카오로만]');
   check('다른 전송 API 미사용', banned.every(b => !HTML.includes(b) && !CORE.includes(b)));
   check('nav-core.js는 네트워크 미사용', !/fetch\(|https?:\/\//.test(CORE));
   check('VERSION 형식', /const VERSION = 'p\d+-\d{4}-\d{2}-\d{2}\.\d+'/.test(HTML));
+  // 테슬라 브라우저 글꼴에 없는 화살표·기호·이모지는 X 박스로 나옴 (2026-11-17 실차) → 화면 글자로 쓰지 않고 SVG 사용
+  const glyphs = [...(HTML + CORE).matchAll(/[\u2190-\u21ff\u2300-\u23ff\u2460-\u27bf\u2900-\u2bff\u{1F000}-\u{1FAFF}]/gu)].map(m => m[0]);
+  check('화살표·기호·이모지 글자 미사용', glyphs.length === 0, [...new Set(glyphs)]);
   check('REST 키를 코드에 하드코딩하지 않음', !/KakaoAK [0-9a-f]{32}/i.test(HTML));
   // 저장소 추적 파일 전체에서 32자리 16진수(카카오 키 형식)는 공개용 JS 키와 테스트용 가짜 키만 허용
   const { execSync } = await import('node:child_process');

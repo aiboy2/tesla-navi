@@ -95,8 +95,9 @@ console.log('[표시 형식]');
 check('formatDist 347 → 350m', N.formatDist(347) === '350m', N.formatDist(347));
 check('formatDist 42 → 40m', N.formatDist(42) === '40m', N.formatDist(42));
 check('formatDist 2345 → 2.3km', N.formatDist(2345) === '2.3km', N.formatDist(2345));
-check('turnIcon 우회전', N.turnIcon({ guidance: '우회전' }) === '↱');
-check('turnIcon 도착', N.turnIcon({ type: 101, guidance: '목적지' }) === '🏁');
+check('turnIcon 우회전', N.turnIcon({ guidance: '우회전' }) === 'right');
+check('turnIcon 좌회전/유턴/직진', N.turnIcon({ guidance: '좌회전' }) === 'left' && N.turnIcon({ guidance: '유턴' }) === 'uturn' && N.turnIcon(null) === 'straight');
+check('turnIcon 도착', N.turnIcon({ type: 101, guidance: '목적지' }) === 'arrive');
 check('guideText', N.guideText({ guidance: '우회전', name: '테헤란로' }) === '우회전 · 테헤란로');
 check('formatEta 오후', /^오후 \d{1,2}:\d{2}$/.test(N.formatEta(new Date(2026, 10, 17, 15, 0).getTime(), 600)), N.formatEta(new Date(2026, 10, 17, 15, 0).getTime(), 600));
 

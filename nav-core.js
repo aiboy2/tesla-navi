@@ -21,7 +21,7 @@ function project(p, a, b) {
   return { t, d: Math.sqrt(dx * dx + dy * dy) };
 }
 
-// 카카오모빌리티 길찾기 응답 → 내부 경로 구조
+// 카카오모빌리티 길찾기 응답 -> 내부 경로 구조
 export function buildRoute(resp) {
   const r = resp && resp.routes && resp.routes[0];
   if (!r) throw new Error('경로 응답이 비어 있습니다');
@@ -94,7 +94,7 @@ export function progress(route, along) {
   return { next, nextIndex: ni, after, distToNext, remainDist, remainTime };
 }
 
-// 경로 이탈 → 재탐색 판단. 정확도가 나쁘면 기준을 넓힌다.
+// 경로 이탈 -> 재탐색 판단. 정확도가 나쁘면 기준을 넓힌다.
 export function createRerouteMonitor({ threshold = 50, holdMs = 5000, cooldownMs = 20000 } = {}) {
   let since = null, lastAt = -Infinity;
   return {
@@ -149,17 +149,18 @@ export function formatDur(sec) {
   const m = Math.round(sec / 60);
   return m < 60 ? m + '분' : Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
 }
+// 안내 아이콘 종류 (화면에서 SVG로 그림 — 테슬라 브라우저 글꼴에 화살표·특수기호 글자가 없어 X 박스로 나옴)
 export function turnIcon(g) {
-  if (!g) return '↑';
+  if (!g) return 'straight';
   const t = g.guidance || '';
-  if (g.type === 101 || /도착|목적지/.test(t)) return '🏁';
-  if (/유턴|U턴/.test(t)) return '⮌';
-  if (/좌회전/.test(t)) return '↰';
-  if (/우회전/.test(t)) return '↱';
-  if (/왼쪽/.test(t)) return '↖';
-  if (/오른쪽/.test(t)) return '↗';
-  if (/경유/.test(t)) return '◉';
-  return '↑';
+  if (g.type === 101 || /도착|목적지/.test(t)) return 'arrive';
+  if (/유턴|U턴/.test(t)) return 'uturn';
+  if (/좌회전/.test(t)) return 'left';
+  if (/우회전/.test(t)) return 'right';
+  if (/왼쪽/.test(t)) return 'keepLeft';
+  if (/오른쪽/.test(t)) return 'keepRight';
+  if (/경유/.test(t)) return 'via';
+  return 'straight';
 }
 export function guideText(g) {
   if (!g) return '';

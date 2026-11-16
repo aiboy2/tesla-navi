@@ -17,21 +17,29 @@ button{font-family:inherit;cursor:pointer;color:var(--fg)}
 /* 상단 회전 안내 */
 #banner{position:absolute;top:12px;left:12px;z-index:5;display:flex;align-items:center;gap:18px;
   background:var(--acc);border-radius:18px;padding:14px 26px 14px 18px;min-width:420px;max-width:calc(100% - 24px);box-shadow:0 6px 24px rgba(0,0,0,.4)}
-#turnIcon{font-size:72px;line-height:1;width:84px;text-align:center}
+#turnIcon{width:84px;height:84px;flex:none}
+#turnIcon svg{width:84px;height:84px}
+.btn svg{width:30px;height:30px;flex:none}
+.btn.ic{padding:0;width:72px;justify-content:center}
+.lbl{white-space:nowrap}
+/* 좁은 화면: 목적지·재탐색은 아이콘만 (하단 줄이 넘치지 않게) */
+@media (max-width:1020px){#btnSearch,#btnReroute{padding:0;width:72px;justify-content:center}#btnSearch .lbl,#btnReroute .lbl{display:none}}
 #turnDist{font-size:52px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums}
 #turnText{font-size:26px;font-weight:600;margin-top:4px}
 #thenText{font-size:18px;opacity:.85;margin-top:4px}
 
 /* 하단 정보/버튼 */
-#bottom{position:absolute;left:12px;right:12px;bottom:12px;z-index:5;display:flex;gap:10px;align-items:stretch;flex-wrap:wrap}
-#info{background:var(--panel);border-radius:16px;padding:12px 20px;display:flex;gap:22px;align-items:center;font-variant-numeric:tabular-nums}
+#bottom{position:absolute;left:12px;right:96px;bottom:12px;z-index:5;display:flex;gap:10px;align-items:stretch;flex-wrap:nowrap;pointer-events:none}
+#bottom>*{pointer-events:auto;flex:none}
+/* 오른쪽 세로 버튼 (확대/축소/현위치/음성/설정) */
+#side{position:absolute;right:12px;bottom:12px;z-index:5;display:flex;flex-direction:column;gap:10px}
+#info{background:var(--panel);border-radius:16px;padding:10px 18px;white-space:nowrap;display:flex;gap:22px;align-items:center;font-variant-numeric:tabular-nums}
 #info b{font-size:32px}
 #info span{font-size:18px;color:var(--dim)}
 .btn{background:var(--panel);border:0;border-radius:16px;padding:0 22px;min-height:72px;font-size:22px;font-weight:700;display:flex;align-items:center;gap:8px}
 .btn.pri{background:var(--acc)}
 .btn.danger{background:#5a1d1d}
 .spacer{flex:1}
-#recenter{position:absolute;right:12px;bottom:100px;z-index:5}
 
 /* 패널 (검색/설정) */
 .sheet{position:absolute;top:12px;left:12px;bottom:12px;width:min(560px,calc(100% - 24px));z-index:10;background:var(--panel);
@@ -58,21 +66,24 @@ button{font-family:inherit;cursor:pointer;color:var(--fg)}
 <div id="map"></div>
 
 <div id="banner" class="hidden">
-  <div id="turnIcon">↑</div>
+  <div id="turnIcon"></div>
   <div><div id="turnDist">—</div><div id="turnText"></div><div id="thenText"></div></div>
 </div>
 <div id="gpsState">위치 수신 대기</div>
 
-<button class="btn hidden" id="recenter">◎ 현위치</button>
 
 <div id="bottom">
   <div id="info" class="hidden"><div><b id="remain">—</b> <span>남음</span></div><div><b id="eta">—</b> <span id="etaDur"></span></div></div>
-  <button class="btn pri" id="btnSearch">🔍 목적지</button>
-  <button class="btn hidden" id="btnReroute">⟳ 재탐색</button>
-  <button class="btn danger hidden" id="btnStop">✕ 안내 종료</button>
-  <div class="spacer"></div>
-  <button class="btn" id="btnVoice">🔊</button>
-  <button class="btn" id="btnSettings">⚙</button>
+  <button class="btn pri" id="btnSearch" data-ic="search" aria-label="목적지"><span class="lbl">목적지</span></button>
+  <button class="btn hidden" id="btnReroute" data-ic="reroute" aria-label="재탐색"><span class="lbl">재탐색</span></button>
+  <button class="btn danger hidden" id="btnStop" data-ic="close" aria-label="안내 종료"><span class="lbl">안내 종료</span></button>
+</div>
+<div id="side">
+  <button class="btn ic" id="zoomIn" data-ic="plus" aria-label="확대"></button>
+  <button class="btn ic" id="zoomOut" data-ic="minus" aria-label="축소"></button>
+  <button class="btn ic pri hidden" id="recenter" data-ic="locate" aria-label="현위치"></button>
+  <button class="btn ic" id="btnVoice" aria-label="음성"></button>
+  <button class="btn ic" id="btnSettings" data-ic="gear" aria-label="설정"></button>
 </div>
 
 <div class="sheet hidden" id="searchSheet">
@@ -104,9 +115,36 @@ window.__sdkError = false;
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-17.2';
+const VERSION = 'p1-2026-11-17.3';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
+
+// ---------- 아이콘 (SVG) ----------
+// 테슬라 브라우저 글꼴에 화살표·특수기호 글자가 없어 X 박스로 나옴 (2026-11-17 실차) -> 글자 대신 SVG로 그림
+const S = 'fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"';
+const ICONS = {
+  // 회전 안내 (흰색, 굵게)
+  straight:  '<path d="M12 21V4M6 10l6-6 6 6"/>',
+  left:      '<path d="M16 21v-8a4 4 0 0 0-4-4H5M9 5L5 9l4 4"/>',
+  right:     '<path d="M8 21v-8a4 4 0 0 1 4-4h7M15 5l4 4-4 4"/>',
+  keepLeft:  '<path d="M15 21v-6L7 7M7 13V7h6"/>',
+  keepRight: '<path d="M9 21v-6l8-8M11 7h6v6"/>',
+  uturn:     '<path d="M15 21V9a5 5 0 0 0-10 0v6M2 12l3 3 3-3"/>',
+  arrive:    '<path d="M6 21V4M6 4h11l-2 4 2 4H6"/>',
+  via:       '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/>',
+  // 버튼
+  search:  '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/>',
+  reroute: '<path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"/>',
+  close:   '<path d="M6 6l12 12M18 6L6 18"/>',
+  plus:    '<path d="M12 5v14M5 12h14"/>',
+  minus:   '<path d="M5 12h14"/>',
+  locate:  '<circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>',
+  gear:    '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  voiceOn: '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  voiceOff:'<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/>'
+};
+const icon = name => '<svg viewBox="0 0 24 24" ' + S + '>' + (ICONS[name] || ICONS.straight) + '</svg>';
+document.querySelectorAll('[data-ic]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.ic)));
 $('ver').textContent = VERSION;
 
 const ls = {
@@ -142,7 +180,7 @@ function speak(text) {
     speechSynthesis.speak(u);
   } catch (e) {}
 }
-function paintVoice() { $('btnVoice').textContent = voiceOn ? '🔊' : '🔇'; }
+function paintVoice() { $('btnVoice').innerHTML = icon(voiceOn ? 'voiceOn' : 'voiceOff'); }
 $('btnVoice').onclick = () => { voiceOn = !voiceOn; ls.set('nav.voice', voiceOn); paintVoice(); if (voiceOn) speak('음성 안내를 켭니다'); };
 $('voiceTest').onclick = () => {
   if (!('speechSynthesis' in window)) { toast('이 브라우저는 음성 합성을 지원하지 않습니다'); return; }
@@ -159,6 +197,8 @@ function initMap() {
                    '<path d="M22 8 L31 30 L22 25 L13 30 Z" fill="#fff"/></svg>';
   meOverlay = new kakao.maps.CustomOverlay({ content: meEl, position: center, xAnchor: 0.5, yAnchor: 0.5, zIndex: 10 });
   kakao.maps.event.addListener(map, 'dragstart', () => setFollow(false));
+  kakao.maps.event.addListener(map, 'zoom_start', () => { lastTouch = Date.now(); });
+  watchTouch($('map'));
   startGeo();
 }
 function setFollow(on) {
@@ -166,6 +206,38 @@ function setFollow(on) {
   if (on && pos) map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng));
 }
 $('recenter').onclick = () => setFollow(true);
+
+// 손가락이 지도에 닿아 있는 동안엔 지도를 자동으로 옮기지 않음.
+// (v1.2까지는 따라가기 중 약 1초마다 setCenter가 불려 끌기·핀치 확대가 덮어써짐 — 2026-11-17 실차 "이동·확대 안 됨")
+let touching = 0, lastTouch = 0, downAt = null;
+function watchTouch(el) {
+  const opt = { capture: true, passive: true };
+  const down = (x, y) => { touching++; lastTouch = Date.now(); downAt = { x, y }; };
+  const up = () => { touching = Math.max(0, touching - 1); lastTouch = Date.now(); if (!touching) downAt = null; };
+  const move = (x, y) => {
+    lastTouch = Date.now();
+    // 카카오 dragstart가 안 오는 경우 대비: 10px 넘게 끌면 따라가기 해제
+    if (downAt && follow && Math.hypot(x - downAt.x, y - downAt.y) > 10) setFollow(false);
+  };
+  if ('PointerEvent' in window) {
+    el.addEventListener('pointerdown', e => down(e.clientX, e.clientY), opt);
+    el.addEventListener('pointermove', e => move(e.clientX, e.clientY), opt);
+    // 손을 버튼 위에서 떼도 놓치지 않도록 window에서 받음
+    ['pointerup', 'pointercancel'].forEach(t => window.addEventListener(t, up, opt));
+  } else {
+    el.addEventListener('touchstart', e => down(e.touches[0].clientX, e.touches[0].clientY), opt);
+    el.addEventListener('touchmove', e => move(e.touches[0].clientX, e.touches[0].clientY), opt);
+    ['touchend', 'touchcancel'].forEach(t => window.addEventListener(t, e => { touching = e.touches.length + 1; up(); }, opt));
+  }
+  el.addEventListener('wheel', () => { lastTouch = Date.now(); }, opt);
+}
+function zoomBy(d) {
+  lastTouch = Date.now();
+  map.setLevel(Math.min(14, Math.max(1, map.getLevel() + d)), { animate: true });
+  if (follow && pos) setTimeout(() => map.setCenter(new kakao.maps.LatLng(pos.lat, pos.lng)), 350);
+}
+$('zoomIn').onclick = () => zoomBy(-1);
+$('zoomOut').onclick = () => zoomBy(1);
 
 // ---------- 위치 ----------
 let lastProc = 0, lastPan = 0, gotFirst = false;
@@ -183,7 +255,7 @@ function onPos(p) {
   pos = { lat: c.latitude, lng: c.longitude, acc: c.accuracy, speed: c.speed, t: Date.now() };
   if (c.heading != null && !isNaN(c.heading) && (c.speed == null || c.speed > 0.8)) lastHeading = c.heading;
   const now = Date.now();
-  if (now - lastProc < 400) return;   // 초당 7회 수준 → 약 2회로 줄임
+  if (now - lastProc < 400) return;   // 초당 7회 수준 -> 약 2회로 줄임
   lastProc = now;
   update(now);
 }
@@ -194,8 +266,11 @@ function update(now) {
   meEl.firstChild.style.transform = 'rotate(' + lastHeading + 'deg)';
   $('gpsState').textContent = 'GPS ±' + Math.round(pos.acc) + 'm' + (pos.speed != null ? ' · ' + Math.round(pos.speed * 3.6) + 'km/h' : '');
   $('gpsState').style.color = pos.acc <= 30 ? 'var(--dim)' : 'var(--warn)';
+  if (touching && now - lastTouch > 8000) touching = 0;   // 떼는 이벤트를 놓친 경우 대비
   if (!gotFirst) { gotFirst = true; map.setCenter(ll); }
-  else if (follow && now - lastPan > 900) { lastPan = now; map.setCenter(ll); }
+  else if (follow && !touching && now - lastTouch > 1500 && now - lastPan > 900) { lastPan = now; map.setCenter(ll); }
+  // 안내 중 지도를 옮겨 둔 채 15초간 조작이 없으면 내 위치 따라가기로 복귀
+  else if (!follow && navigating && !touching && now - lastTouch > 15000) setFollow(true);
   if (navigating && route) navTick(now);
 }
 
@@ -217,7 +292,8 @@ function navTick(now) {
 }
 function renderProgress(P, now) {
   show('banner', true); show('info', true);
-  $('turnIcon').textContent = N.turnIcon(P.next);
+  const ic = N.turnIcon(P.next);
+  if ($('turnIcon').dataset.ic !== ic) { $('turnIcon').dataset.ic = ic; $('turnIcon').innerHTML = icon(ic); }
   $('turnDist').textContent = N.formatDist(P.distToNext);
   $('turnText').textContent = P.next ? N.guideText(P.next) : '목적지';
   $('thenText').textContent = P.after ? '이어서 ' + N.guideText(P.after) : '';
@@ -283,7 +359,7 @@ function setRoute(r, isReroute) {
   show('btnReroute', true); show('btnStop', true);
   if (!isReroute) {
     const b = new kakao.maps.LatLngBounds(); path.forEach(p => b.extend(p));
-    setFollow(false); map.setBounds(b, 80, 80, 160, 80);
+    setFollow(false); lastTouch = Date.now(); map.setBounds(b, 80, 80, 160, 80);
     const s = r.summary;
     toast('경로 ' + N.formatDist(s.distance) + ' · ' + N.formatDur(s.duration) + (s.toll ? ' · 통행료 ' + s.toll.toLocaleString() + '원' : ''), 4000);
     speak('경로 안내를 시작합니다');
