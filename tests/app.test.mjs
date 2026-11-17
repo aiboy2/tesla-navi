@@ -41,5 +41,12 @@ console.log('[정적 검사: 위치는 카카오로만]');
   check('저장소에 비공개 키로 보이는 값 없음', leaks.length === 0, leaks);
 }
 
+console.log('[정적 검사: 카카오/네이버 사이트 진단 스크립트 k.js]');
+{
+  const K = readFileSync(new URL('../k.js', import.meta.url), 'utf8');
+  const banned = ['fetch(', 'XMLHttpRequest', 'sendBeacon', 'WebSocket', 'EventSource', 'new Image', 'import('];
+  check('k.js는 아무 데로도 전송하지 않음', banned.every(b => !K.replace(/^\s*\/\/.*$/gm, '').includes(b)), banned.filter(b => K.replace(/^\s*\/\/.*$/gm, '').includes(b)));
+}
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
