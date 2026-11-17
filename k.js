@@ -1,71 +1,92 @@
-// 카카오맵/네이버지도 웹사이트 위치 진단 (2026-11-17)
-// 사용법: 테슬라 브라우저에서 map.kakao.com 또는 map.naver.com을 연 상태로 주소창에
+// 카카오맵 웹사이트(map.kakao.com)에 테슬라 GPS 내 위치를 붙이는 스크립트 (시험판)
+// 사용법: 테슬라 브라우저에서 map.kakao.com을 연 상태로 주소창에
 //   javascript:import('//aiboy2.github.io/tesla-navi/k.js')
-// 를 입력. 결과 패널을 사진으로 찍어 보내면 됨.
-// 이 스크립트는 화면에 표시만 하고 어디로도 전송하지 않는다 (위치는 이 브라우저 안에서만 표시).
+//
+// 배경 (2026-11-17 실차 진단 k-…17.1): 사이트의 "현위치" 버튼은 있지만 눌러도 브라우저 위치 요청이 0회.
+// 브라우저 위치는 ±4m로 정상. 사이트는 공개 카카오 지도 SDK(kakao.maps)를 사용 -> 사이트의 지도 객체를 잡아
+// 우리가 받은 GPS로 내 위치 표시·따라가기를 직접 붙인다.
+// 위치는 이 브라우저 안에서 지도에 그리기만 하고 어디로도 전송하지 않는다.
 (function () {
-  const V = 'k-2026-11-17.1';
-  const old = document.getElementById('__tnDiag'); if (old) old.remove();
-  const box = document.createElement('div'); box.id = '__tnDiag';
-  box.style.cssText = 'position:fixed;left:10px;top:10px;z-index:2147483647;background:rgba(0,0,0,.92);color:#fff;' +
-    'font:20px/1.45 sans-serif;padding:16px 18px;border-radius:14px;max-width:min(900px,calc(100% - 20px));max-height:calc(100% - 20px);overflow:auto;white-space:pre-wrap;word-break:break-all';
-  const close = document.createElement('button'); close.textContent = '닫기';
-  close.style.cssText = 'float:right;font:20px sans-serif;padding:8px 18px;margin-left:12px;border-radius:10px;border:0';
-  close.onclick = () => box.remove();
-  const out = document.createElement('div'); box.append(close, out); document.body.appendChild(box);
-  const lines = {}; const order = [];
-  const set = (k, v) => { if (!(k in lines)) order.push(k); lines[k] = v; out.textContent = order.map(x => x + ': ' + lines[x]).join('\n'); };
-  const short = s => String(s).length > 160 ? String(s).slice(0, 160) + '…' : String(s);
+  const V = 'k-2026-11-17.2';
+  if (window.__tnK) { window.__tnK.show(); return; }   // 두 번 실행해도 하나만
 
-  set('진단', V + ' @ ' + location.host + location.pathname);
-  set('UA', short(navigator.userAgent));
-  set('터치', 'maxTouchPoints ' + (navigator.maxTouchPoints || 0) + ' · ontouchstart ' + ('ontouchstart' in window) + ' · 화면 ' + innerWidth + 'x' + innerHeight);
-  set('geolocation', 'geolocation' in navigator ? '있음' : '없음');
+  // ---------- 화면 (상태 표시 + 따라가기 버튼) ----------
+  const css = document.createElement('style');
+  css.textContent =
+    '#__tnBar{position:fixed;right:14px;bottom:110px;z-index:2147483647;display:flex;flex-direction:column;gap:10px;align-items:flex-end;font:18px sans-serif}' +
+    '#__tnBar button{border:0;border-radius:16px;min-width:76px;height:76px;padding:0 18px;font:bold 20px sans-serif;color:#fff;background:#1a73e8;box-shadow:0 4px 14px rgba(0,0,0,.35)}' +
+    '#__tnBar button.off{background:#2a2b30}' +
+    '#__tnState{background:rgba(0,0,0,.8);color:#fff;border-radius:10px;padding:6px 10px;font-size:15px;max-width:420px}' +
+    '.__tnMe{width:46px;height:46px}.__tnMe svg{width:46px;height:46px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}';
+  document.head.appendChild(css);
+  const bar = document.createElement('div'); bar.id = '__tnBar';
+  bar.innerHTML = '<div id="__tnState">' + V + ' 준비 중…</div><button id="__tnFollow" class="off">내 위치</button>';
+  document.body.appendChild(bar);
+  const $s = bar.querySelector('#__tnState'), $f = bar.querySelector('#__tnFollow');
+  const st = { map: false, gps: '위치 대기', note: '' };
+  const paint = () => { $s.textContent = 'GPS ' + st.gps + ' · 지도 ' + (st.map ? '연결됨' : '찾는 중') + (st.note ? ' · ' + st.note : ''); };
 
-  // 사이트가 위치를 요청하는지 감시 (이후 사이트 버튼을 눌렀을 때 숫자가 늘면 사이트가 요청한 것)
-  let siteCalls = 0;
-  if (navigator.geolocation && !navigator.geolocation.__tnWrapped) {
-    const g = navigator.geolocation;
-    for (const m of ['getCurrentPosition', 'watchPosition']) {
-      const orig = g[m].bind(g);
-      g[m] = function () { siteCalls++; set('사이트 위치 요청', siteCalls + '회 (' + m + ')'); return orig.apply(null, arguments); };
-    }
-    g.__tnWrapped = true;
+  // ---------- 사이트의 지도 객체 잡기 ----------
+  // kakao.maps.Map의 메서드를 감싸 두면, 사이트가 지도를 쓸 때(이동·확대·창 크기 변경) 그 지도 객체가 잡힌다.
+  let map = null;
+  const K = window.kakao && window.kakao.maps;
+  if (!K || !K.Map) { st.note = '카카오 지도 SDK 없음 (map.kakao.com에서 실행)'; paint(); return; }
+  const proto = K.Map.prototype;
+  const wrapped = [];
+  for (const name of Object.getOwnPropertyNames(proto)) {
+    let d; try { d = Object.getOwnPropertyDescriptor(proto, name); } catch (e) { continue; }
+    if (!d || typeof d.value !== 'function' || name === 'constructor') continue;
+    const orig = d.value;
+    proto[name] = function () { if (!map && this instanceof K.Map) { map = this; onMap(); } return orig.apply(this, arguments); };
+    wrapped.push([name, orig]);
   }
-  set('사이트 위치 요청', '0회 (이 패널을 띄운 뒤 사이트의 위치 버튼을 누르면 늘어나야 함)');
+  const unwrap = () => wrapped.forEach(([n, f]) => { proto[n] = f; });
+  // 사이트가 지도 메서드를 부르게 유도 (창 크기 변경 -> 보통 relayout 호출)
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+  setTimeout(() => { if (!map) { st.note = '지도를 손가락으로 한 번 움직여 주세요'; paint(); } }, 2500);
 
-  // 위치 관련 화면 요소 찾기 (숨겨져 있는지 포함)
-  try {
-    const sel = '[class*="location" i],[id*="location" i],[class*="gps" i],[class*="myloc" i],[class*="current" i][class*="pos" i],' +
-                '[title*="위치"],[aria-label*="위치"],[class*="geo" i]';
-    const els = [...document.querySelectorAll(sel)].filter(e => e !== box && !box.contains(e));
-    const desc = els.slice(0, 8).map(e => {
-      const cs = getComputedStyle(e), r = e.getBoundingClientRect();
-      const vis = cs.display === 'none' ? '숨김(display)' : cs.visibility === 'hidden' ? '숨김(visibility)' : (r.width && r.height ? '보임' : '크기0');
-      return e.tagName.toLowerCase() + '.' + short(String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className).replace(/\s+/g, '.')).slice(0, 60) +
-             (e.getAttribute('title') || e.getAttribute('aria-label') ? ' "' + (e.getAttribute('title') || e.getAttribute('aria-label')) + '"' : '') + ' ' + vis;
-    });
-    const textBtns = [...document.querySelectorAll('button,a,[role=button]')].filter(e => /현\s?위치|내\s?위치/.test(e.textContent || '')).length;
-    set('위치 관련 요소', els.length + '개' + (desc.length ? '\n  ' + desc.join('\n  ') : '') + '\n  "현위치/내 위치" 글자 버튼 ' + textBtns + '개');
-  } catch (e) { set('위치 관련 요소', '오류 ' + e.message); }
-
-  // 지도 객체 단서
-  try {
-    const keys = Object.keys(window).filter(k => /map|kakao|naver|daum/i.test(k)).slice(0, 15);
-    set('전역 단서', keys.join(', ') || '없음');
-    set('카카오 SDK', window.kakao && window.kakao.maps ? '있음' : '없음');
-    set('네이버 SDK', window.naver && window.naver.maps ? '있음' : '없음');
-  } catch (e) { set('전역 단서', '오류 ' + e.message); }
-
-  // 권한 상태 + 이 사이트에서 직접 위치 요청 (권한 팝업이 뜨면 허용)
-  if (navigator.permissions) navigator.permissions.query({ name: 'geolocation' }).then(p => set('권한', p.state), () => set('권한', '조회 실패'));
-  if (navigator.geolocation) {
-    set('직접 요청', '요청 중… (권한 팝업이 뜨면 허용)');
-    const t0 = Date.now();
-    navigator.geolocation.getCurrentPosition.call(navigator.geolocation, // 감시 카운트에 포함되지 않도록 아래에서 보정
-      p => set('직접 요청', '성공 ±' + Math.round(p.coords.accuracy) + 'm · ' + (Date.now() - t0) + 'ms'),
-      e => set('직접 요청', '실패 code ' + e.code + ' ' + e.message),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-    siteCalls = 0; set('사이트 위치 요청', '0회 (이 패널을 띄운 뒤 사이트의 위치 버튼을 누르면 늘어나야 함)');
+  // ---------- 내 위치 ----------
+  let pos = null, heading = 0, follow = false, overlay = null, meEl = null, lastPan = 0, lastDraw = 0;
+  function onMap() {
+    unwrap();
+    st.map = true; st.note = ''; paint();
+    meEl = document.createElement('div'); meEl.className = '__tnMe';
+    meEl.innerHTML = '<svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="#fff"/><circle cx="22" cy="22" r="17" fill="#1a73e8"/>' +
+                     '<path d="M22 8 L31 30 L22 25 L13 30 Z" fill="#fff"/></svg>';
+    overlay = new K.CustomOverlay({ content: meEl, xAnchor: 0.5, yAnchor: 0.5, zIndex: 999,
+                                    position: pos ? new K.LatLng(pos.lat, pos.lng) : map.getCenter() });
+    if (pos) overlay.setMap(map);
+    // 사용자가 지도를 끌면 따라가기 해제
+    try { K.event.addListener(map, 'dragstart', () => setFollow(false)); } catch (e) {}
+    if (pos) setFollow(true);
   }
+  function setFollow(on) {
+    follow = on; $f.className = on ? '' : 'off'; $f.textContent = on ? '따라가는 중' : '내 위치';
+    if (on && map && pos) map.setCenter(new K.LatLng(pos.lat, pos.lng));
+  }
+  $f.onclick = () => { if (!pos) { st.note = '아직 위치 없음'; paint(); return; } setFollow(true); };
+  // 사이트의 "현위치" 버튼도 우리 위치로 동작하게 (사이트 원래 동작은 막음)
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('.btn_currentlocation');
+    if (!b || !pos || !map) return;
+    e.preventDefault(); e.stopPropagation(); setFollow(true);
+  }, true);
+
+  navigator.geolocation.watchPosition(p => {
+    const c = p.coords;
+    pos = { lat: c.latitude, lng: c.longitude, acc: c.accuracy };
+    if (c.heading != null && !isNaN(c.heading) && (c.speed == null || c.speed > 0.8)) heading = c.heading;
+    const now = Date.now();
+    st.gps = '±' + Math.round(c.accuracy) + 'm' + (c.speed != null ? ' · ' + Math.round(c.speed * 3.6) + 'km/h' : '');
+    if (now - lastDraw < 400) return;   // 테슬라는 초당 약 7회 -> 약 2회로
+    lastDraw = now; paint();
+    if (!map) return;
+    const ll = new K.LatLng(pos.lat, pos.lng);
+    overlay.setPosition(ll); if (!overlay.getMap()) { overlay.setMap(map); setFollow(true); }
+    meEl.firstChild.style.transform = 'rotate(' + heading + 'deg)';
+    if (follow && now - lastPan > 900) { lastPan = now; map.panTo(ll); }
+  }, e => { st.gps = '오류 ' + e.code; paint(); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+
+  window.__tnK = { V, show: () => { bar.style.display = ''; }, state: () => ({ map: !!map, pos, follow }) };
+  paint();
 })();
