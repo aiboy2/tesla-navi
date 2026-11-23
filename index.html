@@ -20,8 +20,12 @@ button{font-family:inherit;cursor:pointer;color:inherit;border:0;background:none
 svg{display:block}
 
 /* 지도 (안내 중엔 왼쪽 칸만큼 비켜남) */
+/* 지도 영역 > 회전판 > 카카오 지도. 진행 방향 위 모드에선 회전판을 화면 대각선보다 크게 만들어 돌림
+   (카카오 지도는 회전 기능이 없음 -> 지도 전체를 CSS로 회전. 지도 글자도 같이 돌아감) */
+#mapArea{position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden;touch-action:none}
+body.nav #mapArea{left:var(--pw)}
+#rot{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 50%}
 #map{position:absolute;top:0;right:0;bottom:0;left:0;touch-action:none}  /* 브라우저가 터치 끌기를 스크롤로 가져가지 않게 */
-body.nav #map{left:var(--pw)}
 /* 야간: 지도 그림(타일)만 색 반전해 어두운 지도로 (경로선·마커는 그대로) */
 [data-theme=night] #map img{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.88) saturate(.7)}
 
@@ -51,7 +55,7 @@ body.nav #map{left:var(--pw)}
 #prog{height:8px;border-radius:4px;background:var(--card2);overflow:hidden}
 #progFill{height:100%;width:0;background:var(--turn);transition:width .5s}
 /* 간단히 보기: 왼쪽 칸 대신 지도 위 작은 카드 (회전 안내 + 남은 거리), 지도는 전체 화면 */
-body.nav.compact #map{left:0}
+body.nav.compact #mapArea{left:0}
 body.nav.compact #panel{top:12px;left:12px;bottom:auto;width:min(360px,calc(100% - 96px));border-radius:16px}
 body.nav.compact #infoBox{display:none}
 body.nav.compact #sumRow{border-bottom:0}
@@ -87,6 +91,8 @@ body.nav #searchBar,body.nav #mini{display:none}
 /* 내 위치 화살표, 목적지 핀 */
 .me{width:54px;height:54px}
 .me svg{width:54px;height:54px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.45))}
+.pin{transform-origin:50% 100%}
+#btnCompass svg{width:34px;height:34px}
 .pin svg{width:40px;height:52px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
 
 /* ---------- 검색/설정 시트 ---------- */
@@ -125,7 +131,7 @@ try {
 </script>
 </head>
 <body>
-<div id="map"></div>
+<div id="mapArea"><div id="rot"><div id="map"></div></div></div>
 
 <!-- 안내 중 왼쪽 칸 -->
 <div id="panel" class="hidden">
@@ -165,6 +171,7 @@ try {
   <button class="rb" id="zoomOut" data-ic="minus" aria-label="축소"></button>
   <button class="rb on hidden" id="recenter" data-ic="locate" aria-label="현위치"></button>
   <button class="rb hidden" id="btnReroute" data-ic="reroute" aria-label="재탐색"></button>
+  <button class="rb" id="btnCompass" aria-label="지도 방향"></button>
   <button class="rb" id="btnVoice" aria-label="음성"></button>
   <button class="rb" id="btnSettings" data-ic="gear" aria-label="설정"></button>
 </div>
@@ -182,6 +189,8 @@ try {
   <div class="scroll">
     <div class="sec">화면 테마 (자동: 저녁 6시~아침 7시 야간)</div>
     <div class="seg" data-set="nav.theme"><button data-v="auto">자동</button><button data-v="day">주간</button><button data-v="night">야간</button></div>
+    <div class="sec">지도 방향 (오른쪽 나침반 버튼으로도 전환)</div>
+    <div class="seg" data-set="nav.orient" data-reload="1"><button data-v="heading">진행 방향 위</button><button data-v="north">북쪽 위 (고정)</button></div>
     <div class="sec">카카오 REST API 키 (길찾기용, 이 브라우저에만 저장)</div>
     <div class="row"><input class="inp" id="restKey" placeholder="REST API 키" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="pbtn" id="saveKey">저장</button></div>
     <div class="note" id="keyState"></div>
@@ -207,7 +216,7 @@ try {
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-23.2';
+const VERSION = 'p1-2026-11-23.3';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
@@ -253,7 +262,10 @@ let route = null, dest = null, segHint = 0, navigating = false, routing = false,
 let voiceOn = ls.get('nav.voice', true);
 // 지도 터치 방식: 자동이면 휴대폰은 카카오 자체 조작(관성 스크롤 등), 테슬라(데스크톱으로 인식)는 앱 처리
 const gestureSetting = ls.get('nav.gesture', 'auto');
-const gestureMode = gestureSetting !== 'auto' ? gestureSetting : (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'kakao' : 'app');
+// 진행 방향 위 모드는 지도를 회전시키므로 카카오 자체 끌기는 방향이 틀어짐 -> 앱 처리만 사용
+const orient = ls.get('nav.orient', 'heading');
+const gestureMode = orient === 'heading' ? 'app' :
+  gestureSetting !== 'auto' ? gestureSetting : (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'kakao' : 'app');
 let followMode = ls.get('nav.followMode', 'smooth');
 const smoother = N.createSmoother();
 const monitor = N.createRerouteMonitor({ threshold: 50, holdMs: 5000, cooldownMs: 20000 });
@@ -313,6 +325,38 @@ $('voiceTest').onclick = () => {
 };
 paintVoice();
 
+// ---------- 지도 회전 (진행 방향 위) ----------
+// geo: 회전판 크기(w,h)와 화면에서 내 위치가 놓일 점(ax, ay: 지도 영역 기준)
+let geo = { ax: 0, ay: 0, w: 0, h: 0 }, rotDeg = 0, rotFrozen = false, lastFrameT = 0;
+function layoutMap() {
+  const A = $('mapArea'), W = A.clientWidth, H = A.clientHeight, R = $('rot');
+  if (orient === 'heading') {
+    const ax = W / 2, ay = H * 0.68;   // 내 위치를 아래쪽에 -> 앞쪽이 더 많이 보임
+    const r = Math.max(...[[0, 0], [W, 0], [0, H], [W, H]].map(([x, y]) => Math.hypot(x - ax, y - ay)));
+    const D = Math.ceil(2 * r) + 4;
+    geo = { ax, ay, w: D, h: D };
+  } else geo = { ax: W / 2, ay: H / 2, w: W, h: H };
+  Object.assign(R.style, { width: geo.w + 'px', height: geo.h + 'px', left: (geo.ax - geo.w / 2) + 'px', top: (geo.ay - geo.h / 2) + 'px' });
+  if (map) { map.relayout(); const d = smoother.at(Date.now()); if (follow && d) map.setCenter(new kakao.maps.LatLng(d.lat, d.lng)); }
+}
+function applyRot() {
+  $('rot').style.transform = rotDeg ? 'rotate(' + (-rotDeg) + 'deg)' : '';
+  const c = $('btnCompass').firstChild; if (c) c.style.transform = 'rotate(' + (-rotDeg) + 'deg)';
+  if (destOverlay && destOverlay.__el) destOverlay.__el.style.transform = rotDeg ? 'rotate(' + rotDeg + 'deg)' : '';   // 핀은 똑바로 세움
+}
+// 화면 좌표 -> 회전판(카카오 지도) 안의 좌표 (손 조작에 사용)
+function toLocal(cx, cy) {
+  const r = $('mapArea').getBoundingClientRect(), a = rotDeg * Math.PI / 180;
+  const x = cx - r.left - geo.ax, y = cy - r.top - geo.ay;
+  return { x: x * Math.cos(a) - y * Math.sin(a) + geo.w / 2, y: x * Math.sin(a) + y * Math.cos(a) + geo.h / 2 };
+}
+// 나침반 버튼: 빨간 바늘이 북쪽을 가리킴. 누르면 진행 방향 위 <-> 북쪽 위
+$('btnCompass').innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3l3.2 9H8.8z" fill="#ef4444"/><path d="M12 21l-3.2-9h6.4z" fill="currentColor" opacity=".45"/>' +
+  '</svg>';
+$('btnCompass').onclick = () => { ls.set('nav.orient', orient === 'heading' ? 'north' : 'heading'); location.reload(); };
+window.addEventListener('resize', () => layoutMap());
+layoutMap();
+
 // ---------- 지도 ----------
 function initMap() {
   const center = new kakao.maps.LatLng(37.5665, 126.978);
@@ -354,7 +398,7 @@ paintFold();
 // 왼쪽 칸이 생기거나 없어지면 지도 크기가 바뀜 -> 카카오에 알려야 함
 function setNavLayout(on) {
   document.body.classList.toggle('nav', on); show('panel', on);
-  if (map) { map.relayout(); const d = smoother.at(Date.now()); if (follow && d) map.setCenter(new kakao.maps.LatLng(d.lat, d.lng)); }
+  layoutMap();
 }
 
 // ---------- 지도 조작 (끌기·두 손가락 확대) ----------
@@ -364,7 +408,7 @@ function setNavLayout(on) {
 function gestures(el) {
   const pts = new Map();     // 닿아 있는 손가락: id -> {x, y} (지도 영역 기준 좌표)
   let g = null;              // 진행 중 제스처: f0(원래 화면의 기준점), f1(지금 손가락 기준점), s(배율), base/d0(핀치 기준)
-  let settleTm = 0, origin = { x: 0, y: 0 }, inertia = 0;
+  let settleTm = 0, inertia = 0;
   const W = () => el.clientWidth, H = () => el.clientHeight;
   const focus = () => {
     const a = [...pts.values()];
@@ -435,13 +479,12 @@ function gestures(el) {
   function down(id, x, y) {
     if (inertia) { cancelAnimationFrame(inertia); inertia = 0; commit(); }   // 미끄러지는 중 다시 잡으면 그 자리에서 멈춤
     if (settleTm) commit();
-    if (!pts.size) { const r = el.getBoundingClientRect(); origin = { x: r.left, y: r.top }; }
-    pts.set(id, { x: x - origin.x, y: y - origin.y }); touching = pts.size; lastTouch = Date.now();
+    pts.set(id, toLocal(x, y)); touching = pts.size; lastTouch = Date.now();
     if (pts.size <= 2) rebase();
   }
   function move(id, x, y) {
     const p = pts.get(id); if (!p || !g) return;
-    p.x = x - origin.x; p.y = y - origin.y; lastTouch = Date.now();
+    const q = toLocal(x, y); p.x = q.x; p.y = q.y; lastTouch = Date.now();
     const f = focus();
     if (pts.size === 1) {
       if (!g.moved && Math.hypot(f.x - g.start.x, f.y - g.start.y) < 10) return;   // 탭은 무시
@@ -503,13 +546,20 @@ $('zoomOut').onclick = () => zoomBy(1);
 
 // ---------- 화면 그리기 (매 프레임) ----------
 // GPS(초당 약 7회) 사이를 보간해 화살표와 지도를 매 프레임 조금씩 움직임 -> 1초마다 툭툭 옮기던 v1.5까지의 끊김 해소
-let lastPan = 0, lastDrawn = null, frames = 0, fpsT = 0, fps = 0;
+let lastPan = 0, lastDrawn = null, frames = 0, fpsT = 0, fps = 0, overviewUntil = 0;
 function frame(t) {
   requestAnimationFrame(frame);
   frames++; if (t - fpsT > 1000) { fps = Math.round(frames * 1000 / (t - fpsT)); frames = 0; fpsT = t; }
   if (!map) return;
   const now = Date.now(), d = smoother.at(now);
   if (!d) return;
+  // 지도 회전: 따라가는 중엔 진행 방향으로 부드럽게, 손으로 지도를 볼 때(따라가기 해제·터치 중)는 멈춤, 경로 미리보기 중엔 북쪽
+  const dtf = lastFrameT ? Math.min(100, t - lastFrameT) : 16; lastFrameT = t;
+  const target = orient !== 'heading' || overviewUntil > now ? 0 : d.heading;
+  if (!touching && (follow || overviewUntil > now || orient !== 'heading')) {
+    const diff = N.angleDiff(rotDeg, target);
+    if (Math.abs(diff) > 0.05) { rotDeg = (rotDeg + diff * Math.min(1, dtf / 250) + 360) % 360; applyRot(); }
+  }
   if (lastDrawn && lastDrawn.lat === d.lat && lastDrawn.lng === d.lng && lastDrawn.heading === d.heading) return;   // 멈춰 있으면 쉬기
   lastDrawn = d;
   const ll = new kakao.maps.LatLng(d.lat, d.lng);
@@ -701,7 +751,10 @@ function setRoute(r, isReroute) {
   paintRoute();
   if (!isReroute) {
     const b = new kakao.maps.LatLngBounds(); r.pts.forEach(p => b.extend(new kakao.maps.LatLng(p.lat, p.lng)));
-    setFollow(false); lastTouch = Date.now(); map.setBounds(b, 60, 90, 60, 60);
+    // 경로 전체 미리보기: 잠깐 북쪽 위로 두고, 회전판 중 화면에 보이는 부분에 맞춤
+    setFollow(false); lastTouch = Date.now(); overviewUntil = Date.now() + 4000; rotDeg = 0; applyRot();
+    const A = $('mapArea'), ox = geo.w / 2 - geo.ax, oy = geo.h / 2 - geo.ay;
+    map.setBounds(b, oy + 90, geo.w - ox - A.clientWidth + 60, geo.h - oy - A.clientHeight + 60, ox + 60);
     const s = r.summary;
     toast('경로 ' + N.formatDist(s.distance) + ' · ' + N.formatDur(s.duration) + (s.toll ? ' · 통행료 ' + s.toll.toLocaleString() + '원' : ''), 4000);
     speak('경로 안내를 시작합니다');
@@ -760,6 +813,7 @@ function chooseDest(r) {
   const el = document.createElement('div'); el.className = 'pin';
   el.innerHTML = '<svg viewBox="0 0 24 30"><path d="M12 1C6.5 1 2 5.3 2 10.8 2 18 12 29 12 29s10-11 10-18.2C22 5.3 17.5 1 12 1z" fill="#ef4444" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="11" r="3.6" fill="#fff"/></svg>';
   destOverlay = new kakao.maps.CustomOverlay({ content: el, position: new kakao.maps.LatLng(r.lat, r.lng), xAnchor: 0.5, yAnchor: 1, zIndex: 9 });
+  destOverlay.__el = el; applyRot();
   destOverlay.setMap(map);
   requestRoute(false);
 }
