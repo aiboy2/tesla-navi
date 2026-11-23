@@ -22,8 +22,8 @@ function project(p, a, b) {
 }
 
 // 카카오모빌리티 길찾기 응답 -> 내부 경로 구조
-export function buildRoute(resp) {
-  const r = resp && resp.routes && resp.routes[0];
+export function buildRoute(resp, index = 0) {
+  const r = resp && resp.routes && resp.routes[index];
   if (!r) throw new Error('경로 응답이 비어 있습니다');
   if (r.result_code !== 0) throw new Error(r.result_msg || ('길찾기 실패 (코드 ' + r.result_code + ')'));
   const pts = [], rawGuides = [], roads = [];
@@ -232,4 +232,32 @@ export function autoLevel(kmh, distToNext, current) {
     if (kmh >= lo - 5 && (!hiStep || kmh < hiStep[0] + 5)) return current;
   }
   return want;
+}
+
+// 대안 경로 포함 응답(alternatives=true) -> 성공한 경로들. 첫 번째(추천) 실패면 에러
+export function buildRoutes(resp) {
+  const n = (resp && resp.routes && resp.routes.length) || 0;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    try { out.push(buildRoute(resp, i)); } catch (e) { if (i === 0) throw e; }
+  }
+  if (!out.length) throw new Error('경로 응답이 비어 있습니다');
+  // 거의 같은 경로(거리·시간 차이 1% 미만) 중복 제거
+  return out.filter((r, i) => !out.slice(0, i).some(q =>
+    Math.abs(q.summary.distance - r.summary.distance) < q.summary.distance * 0.01 &&
+    Math.abs(q.summary.duration - r.summary.duration) < q.summary.duration * 0.01));
+}
+// 경로 후보 이름표: 첫 번째는 "추천", 그 외 특징(최단 시간·최단 거리·무료)
+export function routeTags(list) {
+  const minT = Math.min(...list.map(r => r.summary.duration)), minD = Math.min(...list.map(r => r.summary.distance));
+  const anyToll = list.some(r => r.summary.toll > 0);
+  return list.map((r, i) => {
+    const t = [];
+    if (i === 0) t.push('추천');
+    if (list.length > 1 && r.summary.duration === minT) t.push('최단 시간');
+    if (list.length > 1 && r.summary.distance === minD) t.push('최단 거리');
+    if (anyToll && !(r.summary.toll > 0)) t.push('무료');
+    if (!t.length) t.push('대안 ' + i);
+    return t;
+  });
 }

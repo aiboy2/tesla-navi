@@ -126,5 +126,21 @@ console.log('[화면 표시용 계산]');
   check('자동 확대: 경계 흔들림 방지', N.autoLevel(43, 1000, 4) === 4 && N.autoLevel(88, 1000, 4) === 4 && N.autoLevel(91, 1000, 4) === 5);
 }
 
+console.log('[여러 경로]');
+{
+  const multi = JSON.parse(JSON.stringify(resp));
+  const alt = JSON.parse(JSON.stringify(resp.routes[0])); alt.summary = { distance: 1400, duration: 240, fare: { toll: 0 } };
+  const alt2 = JSON.parse(JSON.stringify(resp.routes[0])); alt2.summary = { distance: 1505, duration: 181, fare: { toll: 0 } };  // 추천과 거의 같음
+  const bad = { result_code: 104, result_msg: 'x' };
+  multi.routes[0].summary = { distance: 1500, duration: 180, fare: { toll: 1000 } };
+  multi.routes.push(alt, alt2, bad);
+  const rs = N.buildRoutes(multi);
+  check('실패 경로·중복 경로 제외', rs.length === 2, rs.length);
+  const tags = N.routeTags(rs);
+  check('이름표: 추천=최단 시간, 대안=최단 거리·무료', tags[0].join() === '추천,최단 시간' && tags[1].join() === '최단 거리,무료', tags);
+  let err = null; try { N.buildRoutes({ routes: [bad] }); } catch (e) { err = e.message; }
+  check('추천 경로 실패면 에러', err === 'x', err);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -88,6 +88,16 @@ body.nav #roadName{left:calc(var(--pw) + (100% - var(--pw)) / 2)}
 #gpsChip{position:absolute;top:12px;right:12px;z-index:5;padding:6px 10px;font-size:14px;color:var(--dim);border-radius:10px}
 body.nav #searchBar,body.nav #mini{display:none}
 
+/* 경로 선택 (여러 경로 후보) */
+#routeSheet{position:absolute;left:12px;right:84px;bottom:12px;z-index:7;padding:12px;display:flex;flex-direction:column;gap:10px}
+#routeCards{display:flex;gap:10px;overflow-x:auto}
+.rc{flex:1;min-width:150px;text-align:left;border:2px solid var(--line);border-radius:12px;padding:10px 12px}
+.rc.sel{border-color:var(--acc);background:rgba(26,115,232,.10)}
+.rc .tag{font-size:13px;font-weight:700;color:var(--acc)}
+.rc b{display:block;font-size:24px;font-weight:800;margin-top:2px}
+.rc small{display:block;color:var(--dim);font-size:14px;margin-top:2px}
+body.preview #searchBar,body.preview #mini,body.preview #roadName{display:none}
+body.preview #toast{bottom:200px}
 /* 내 위치 화살표, 목적지 핀 */
 .me{width:54px;height:54px}
 .me svg{width:54px;height:54px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.45))}
@@ -175,6 +185,10 @@ try {
   <button class="rb" id="btnVoice" aria-label="음성"></button>
   <button class="rb" id="btnSettings" data-ic="gear" aria-label="설정"></button>
 </div>
+<div id="routeSheet" class="card hidden">
+  <div id="routeCards"></div>
+  <div class="row"><button class="gbtn" id="routeCancel">취소</button><button class="pbtn" id="routeGo" style="flex:1">안내 시작</button></div>
+</div>
 <div id="roadName" class="card hidden"></div>
 <div id="gpsChip" class="card hidden"></div>
 
@@ -216,7 +230,7 @@ try {
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-23.3';
+const VERSION = 'p1-2026-11-23.4';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
@@ -710,8 +724,9 @@ async function requestRoute(isReroute) {
   routing = true;
   const call = async withAngle => {
     const angle = withAngle ? ',angle=' + Math.round(lastHeading) : '';
+    // 처음 길찾기는 대안 경로도 함께 요청 (호출 1회). 재탐색은 추천 경로만
     const qs = 'origin=' + pos.lng + ',' + pos.lat + angle + '&destination=' + dest.lng + ',' + dest.lat +
-               '&priority=RECOMMEND&summary=false&road_details=false';
+               '&priority=RECOMMEND&summary=false&road_details=false' + (isReroute ? '' : '&alternatives=true');
     countCall();
     const res = await fetch(DIRECTIONS_URL + '?' + qs, { headers: { Authorization: 'KakaoAK ' + restKey() } });
     return { res, body: await res.json().catch(() => ({})) };
@@ -725,20 +740,75 @@ async function requestRoute(isReroute) {
       const msg = body.msg || body.message || ('HTTP ' + res.status);
       throw new Error(res.status === 401 || res.status === 403 ? 'REST 키 오류 또는 길찾기 사용 권한 없음: ' + msg : msg);
     }
-    setRoute(N.buildRoute(body), isReroute);
+    if (isReroute) { setRoute(N.buildRoute(body), true); return; }
+    const list = N.buildRoutes(body);
+    if (list.length === 1) setRoute(list[0], false);   // 후보가 하나면 선택 화면 없이 바로 출발
+    else showChoices(list);
   } catch (e) {
     toast('길찾기 실패: ' + e.message, 6000);
   } finally { routing = false; }
 }
-// 경로선: 테두리 + 정체 단계별 색 (원활 초록, 서행·지연 주황, 정체 빨강)
+
+// ---------- 경로 선택 ----------
+let choices = null, chosen = 0;
+function showChoices(list) {
+  choices = list; chosen = 0;
+  document.body.classList.add('preview'); show('routeSheet', true);
+  const tags = N.routeTags(list), box = $('routeCards'); box.innerHTML = '';
+  list.forEach((r, i) => {
+    const b = document.createElement('button'); b.className = 'rc';
+    const s = r.summary;
+    b.innerHTML = '<span class="tag">' + esc(tags[i].join(' · ')) + '</span><b>' + esc(N.formatDur(s.duration)) + '</b>' +
+      '<small>' + esc(N.formatDist(s.distance)) + (s.toll ? ' · 통행료 ' + s.toll.toLocaleString() + '원' : ' · 무료') + '</small>' +
+      '<small>' + esc(N.formatEta(Date.now(), s.duration)) + ' 도착</small>';
+    b.onclick = () => { chosen = i; paintChoices(); };
+    box.appendChild(b);
+  });
+  paintChoices();
+  // 경로 전체가 보이게 (북쪽 위, 아래 선택 카드 높이만큼 비움)
+  setFollow(false); lastTouch = Date.now(); overviewUntil = Infinity; rotDeg = 0; applyRot();
+  fitPoints(list.flatMap(r => r.pts), $('routeSheet').offsetHeight + 30);
+  speak('경로 ' + list.length + '개를 찾았습니다');
+}
+function paintChoices() {
+  [...$('routeCards').children].forEach((b, i) => b.classList.toggle('sel', i === chosen));
+  paintRoute();
+}
+function endChoices() {
+  choices = null; document.body.classList.remove('preview'); show('routeSheet', false); overviewUntil = 0;
+}
+$('routeGo').onclick = () => { const r = choices[chosen]; endChoices(); setRoute(r, false); };
+$('routeCancel').onclick = () => {
+  endChoices(); dest = null;
+  routeLines.forEach(l => l.setMap(null)); routeLines = [];
+  if (destOverlay) destOverlay.setMap(null);
+  setFollow(true);
+};
+// 회전판 중 화면에 보이는 부분에 점들이 다 들어오게 (bottomPad: 아래쪽 가림 높이)
+function fitPoints(pts, bottomPad) {
+  const b = new kakao.maps.LatLngBounds(); pts.forEach(p => b.extend(new kakao.maps.LatLng(p.lat, p.lng)));
+  const A = $('mapArea'), ox = geo.w / 2 - geo.ax, oy = geo.h / 2 - geo.ay;
+  map.setBounds(b, oy + 90, geo.w - ox - A.clientWidth + 90, geo.h - oy - A.clientHeight + (bottomPad || 60), ox + 60);
+}
+
+// 경로선: 테두리 + 정체 단계별 색 (원활 초록, 서행·지연 주황, 정체 빨강). 선택 화면에선 다른 후보는 회색
 const TRAFFIC_COLOR = { free: '#16a34a', slow: '#f59e0b', jam: '#ef4444' };
 function paintRoute() {
-  if (!map || !route) return;
+  if (!map) return;
   routeLines.forEach(l => l.setMap(null)); routeLines = [];
-  const night = document.documentElement.dataset.theme === 'night';
-  const path = route.pts.map(p => new kakao.maps.LatLng(p.lat, p.lng));
-  routeLines.push(new kakao.maps.Polyline({ path, strokeWeight: 14, strokeColor: night ? '#0b0d10' : '#ffffff', strokeOpacity: 0.95 }));
-  for (const r of N.trafficRuns(route)) {
+  const main = choices ? choices[chosen] : route;
+  if (!main) return;
+  const night = document.documentElement.dataset.theme === 'night', casing = night ? '#0b0d10' : '#ffffff';
+  const toPath = r => r.pts.map(p => new kakao.maps.LatLng(p.lat, p.lng));
+  if (choices) choices.forEach((r, i) => {
+    if (i === chosen) return;
+    const path = toPath(r);
+    routeLines.push(new kakao.maps.Polyline({ path, strokeWeight: 12, strokeColor: casing, strokeOpacity: 0.9 }));
+    routeLines.push(new kakao.maps.Polyline({ path, strokeWeight: 7, strokeColor: night ? '#6b7280' : '#9ca3af', strokeOpacity: 1 }));
+  });
+  const path = toPath(main);
+  routeLines.push(new kakao.maps.Polyline({ path, strokeWeight: 14, strokeColor: casing, strokeOpacity: 0.95 }));
+  for (const r of N.trafficRuns(main)) {
     routeLines.push(new kakao.maps.Polyline({ path: path.slice(r.from, r.to + 1), strokeWeight: 9, strokeColor: TRAFFIC_COLOR[r.level], strokeOpacity: 1 }));
   }
   routeLines.forEach(l => l.setMap(map));
@@ -750,11 +820,9 @@ function setRoute(r, isReroute) {
   setText('destName', dest ? dest.name : '');
   paintRoute();
   if (!isReroute) {
-    const b = new kakao.maps.LatLngBounds(); r.pts.forEach(p => b.extend(new kakao.maps.LatLng(p.lat, p.lng)));
-    // 경로 전체 미리보기: 잠깐 북쪽 위로 두고, 회전판 중 화면에 보이는 부분에 맞춤
+    // 경로 전체 미리보기: 잠깐 북쪽 위로 두고 경로가 다 보이게
     setFollow(false); lastTouch = Date.now(); overviewUntil = Date.now() + 4000; rotDeg = 0; applyRot();
-    const A = $('mapArea'), ox = geo.w / 2 - geo.ax, oy = geo.h / 2 - geo.ay;
-    map.setBounds(b, oy + 90, geo.w - ox - A.clientWidth + 60, geo.h - oy - A.clientHeight + 60, ox + 60);
+    fitPoints(r.pts);
     const s = r.summary;
     toast('경로 ' + N.formatDist(s.distance) + ' · ' + N.formatDur(s.duration) + (s.toll ? ' · 통행료 ' + s.toll.toLocaleString() + '원' : ''), 4000);
     speak('경로 안내를 시작합니다');
@@ -805,6 +873,8 @@ function renderChips() {
   });
 }
 function chooseDest(r) {
+  if (choices) endChoices();
+  if (navigating) stopNav();   // 안내 중 새 목적지 -> 기존 안내 종료 후 새로 찾기
   dest = { name: r.name, addr: r.addr, lat: r.lat, lng: r.lng };
   const rec = ls.get('nav.recent', []).filter(x => x.name !== r.name || x.addr !== r.addr);
   rec.unshift(dest); ls.set('nav.recent', rec.slice(0, 5)); renderChips();
@@ -857,7 +927,7 @@ if (window.__sdkError || !window.kakao || !kakao.maps) {
 }
 
 // 디버그/검증용 (실차 문제 분석 시 콘솔에서 사용)
-window.__nav = { N, setRouteFromResponse: (resp, d) => { dest = d || dest || { name: '테스트 목적지' }; setRoute(N.buildRoute(resp), false); },
+window.__nav = { N, showChoicesFromResponse: (resp, d) => { dest = d || { name: '테스트 목적지' }; showChoices(N.buildRoutes(resp)); }, setRouteFromResponse: (resp, d) => { dest = d || dest || { name: '테스트 목적지' }; setRoute(N.buildRoute(resp), false); },
                  feed: (lat, lng, heading = 0, speed = 10) => onPos({ coords: { latitude: lat, longitude: lng, accuracy: 5, heading, speed }, timestamp: 0 }),
                  state: () => ({ pos, follow, navigating, segHint, dest, level: map && map.getLevel(), fps }) };
 </script>
