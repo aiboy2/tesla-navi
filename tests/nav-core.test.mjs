@@ -101,5 +101,30 @@ check('turnIcon 도착', N.turnIcon({ type: 101, guidance: '목적지' }) === 'a
 check('guideText', N.guideText({ guidance: '우회전', name: '테헤란로' }) === '우회전 · 테헤란로');
 check('formatEta 오후', /^오후 \d{1,2}:\d{2}$/.test(N.formatEta(new Date(2026, 10, 17, 15, 0).getTime(), 600)), N.formatEta(new Date(2026, 10, 17, 15, 0).getTime(), 600));
 
+console.log('[화면 표시용 계산]');
+{
+  const rr = N.buildRoute(resp);
+  check('도로 구간 2개 기록', rr.roads.length === 2 && rr.roads[0].from === 0 && rr.roads[1].to === rr.pts.length - 1, rr.roads);
+  const resp2 = JSON.parse(JSON.stringify(resp));
+  resp2.routes[0].sections[0].roads[0].traffic_state = 1; resp2.routes[0].sections[0].roads[1].traffic_state = 4;
+  resp2.routes[0].sections[0].roads[0].name = '테헤란로'; resp2.routes[0].sections[0].roads[1].name = '강남대로';
+  const r2 = N.buildRoute(resp2), runs = N.trafficRuns(r2);
+  check('정체/원활 구간 분리', runs.length === 2 && runs[0].level === 'jam' && runs[1].level === 'free' && runs[0].to === runs[1].from, runs);
+  check('현재 도로명', N.roadNameAt(r2, 500) === '테헤란로' && N.roadNameAt(r2, 1200) === '강남대로');
+  check('각도 최단 회전', N.angleDiff(350, 10) === 20 && N.angleDiff(10, 350) === -20);
+  const sm = N.createSmoother();
+  sm.push({ lat: 37.5, lng: 127.0, heading: 350 }, 0);
+  sm.push({ lat: 37.5, lng: 127.001, heading: 10 }, 300);
+  const mid = sm.at(450), end = sm.at(2000);
+  check('보간: 중간 위치', mid.lng > 127.0 && mid.lng < 127.001, mid);
+  check('보간: 북쪽을 넘어 짧게 회전', (mid.heading > 350 || mid.heading < 10), mid.heading);
+  check('보간: 끝나면 새 위치', Math.abs(end.lng - 127.001) < 1e-9);
+  sm.push({ lat: 37.6, lng: 127.001, heading: 0 }, 2100);
+  check('보간: 큰 점프는 즉시 이동', Math.abs(sm.at(2101).lat - 37.6) < 1e-9);
+  check('자동 확대: 저속 3, 시내 4, 고속 5', N.autoLevel(20) === 3 && N.autoLevel(60) === 4 && N.autoLevel(100) === 5);
+  check('자동 확대: 회전 직전 2', N.autoLevel(60, 200, 4) === 2);
+  check('자동 확대: 경계 흔들림 방지', N.autoLevel(43, 1000, 4) === 4 && N.autoLevel(88, 1000, 4) === 4 && N.autoLevel(91, 1000, 4) === 5);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

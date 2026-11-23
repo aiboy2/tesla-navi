@@ -26,14 +26,16 @@ export function buildRoute(resp) {
   const r = resp && resp.routes && resp.routes[0];
   if (!r) throw new Error('경로 응답이 비어 있습니다');
   if (r.result_code !== 0) throw new Error(r.result_msg || ('길찾기 실패 (코드 ' + r.result_code + ')'));
-  const pts = [], rawGuides = [];
+  const pts = [], rawGuides = [], roads = [];
   for (const s of r.sections || []) {
     for (const road of s.roads || []) {
-      const v = road.vertexes || [];
+      const v = road.vertexes || [], from = Math.max(0, pts.length - 1);
       for (let i = 0; i + 1 < v.length; i += 2) {
         const p = { lat: v[i + 1], lng: v[i] }, last = pts[pts.length - 1];
         if (!last || last.lat !== p.lat || last.lng !== p.lng) pts.push(p);
       }
+      // 도로별 이름·정체 상태 (경로선 색칠, 현재 도로명 표시용). from/to는 pts 인덱스
+      if (pts.length - 1 > from) roads.push({ from, to: pts.length - 1, name: road.name || '', traffic: road.traffic_state || 0 });
     }
     for (const g of s.guides || []) rawGuides.push(g);
   }
@@ -56,7 +58,7 @@ export function buildRoute(resp) {
              type: g.type, guidance: g.guidance || '', name: g.name || '' };
   });
   const sm = r.summary || {};
-  return { pts, cum, total: cum[cum.length - 1], guides,
+  return { pts, cum, total: cum[cum.length - 1], guides, roads,
            summary: { distance: sm.distance, duration: sm.duration, toll: sm.fare ? sm.fare.toll : 0 } };
 }
 
@@ -165,4 +167,69 @@ export function turnIcon(g) {
 export function guideText(g) {
   if (!g) return '';
   return g.guidance + (g.name && !g.guidance.includes(g.name) ? ' · ' + g.name : '');
+}
+
+// ---------- 화면 표시용 계산 ----------
+
+// 카카오 traffic_state: 0 정보없음, 1 정체, 2 지연, 3 서행, 4 원활, 6 사고
+export function trafficLevel(state) {
+  return state === 1 || state === 6 ? 'jam' : state === 2 ? 'slow' : state === 3 ? 'slow' : 'free';
+}
+// 경로를 정체 단계가 같은 구간끼리 묶는다 -> [{level, from, to}] (pts 인덱스, 끝점 공유)
+export function trafficRuns(route) {
+  const runs = [];
+  for (const rd of route.roads || []) {
+    const level = trafficLevel(rd.traffic), last = runs[runs.length - 1];
+    if (last && last.level === level && last.to === rd.from) last.to = rd.to;
+    else runs.push({ level, from: rd.from, to: rd.to });
+  }
+  if (!runs.length) runs.push({ level: 'free', from: 0, to: route.pts.length - 1 });
+  return runs;
+}
+// 경로 위 위치(along)의 도로 이름
+export function roadNameAt(route, along) {
+  for (const rd of route.roads || []) if (route.cum[rd.to] >= along) return rd.name;
+  return '';
+}
+
+// 각도 a -> b 의 최단 회전량 (-180~180)
+export function angleDiff(a, b) { return ((b - a) % 360 + 540) % 360 - 180; }
+
+// GPS 사이를 이어 그리는 보간기. 새 위치가 오면 "지금 화면 위치 -> 새 위치"를 평균 수신 간격 동안 이동.
+// 화면은 매 프레임 at(now)로 위치를 받아 그린다 -> 1초마다 툭툭 옮기지 않고 부드럽게 움직임.
+export function createSmoother({ snapMeters = 150, minMs = 80, maxMs = 1200 } = {}) {
+  let from = null, to = null, t0 = 0, dur = 0, lastAt = 0, avg = 300;
+  const lerp = (a, b, k) => a + (b - a) * k;
+  function at(now) {
+    if (!to) return null;
+    if (!from || dur <= 0) return { ...to };
+    const k = Math.max(0, Math.min(1, (now - t0) / dur));
+    return { lat: lerp(from.lat, to.lat, k), lng: lerp(from.lng, to.lng, k),
+             heading: (from.heading + angleDiff(from.heading, to.heading) * k + 360) % 360 };
+  }
+  return {
+    push(p, now) {
+      const cur = at(now);
+      if (lastAt) avg = avg * 0.7 + Math.max(minMs, Math.min(maxMs, now - lastAt)) * 0.3;
+      lastAt = now;
+      const next = { lat: p.lat, lng: p.lng, heading: p.heading == null ? (cur ? cur.heading : 0) : p.heading };
+      if (!cur || dist(cur, next) > snapMeters) { from = null; to = next; dur = 0; return; }   // 큰 점프는 바로 이동
+      from = cur; to = next; t0 = now; dur = avg;
+    },
+    at
+  };
+}
+
+// 속도·다음 안내까지 거리로 지도 확대 단계 결정 (카카오 레벨: 작을수록 확대). 경계에서 흔들리지 않게 여유를 둔다.
+export function autoLevel(kmh, distToNext, current) {
+  if (distToNext != null && distToNext < 250) return 2;          // 회전 직전엔 크게
+  const steps = [[0, 3], [45, 4], [85, 5]];                        // 시속 기준
+  let want = 3;
+  for (const [v, lv] of steps) if (kmh >= v) want = lv;
+  if (current != null && want !== current && current >= 3 && current <= 5) {
+    // 현재 단계 경계에서 ±5km/h 안쪽이면 유지
+    const lo = steps.find(x => x[1] === current)[0], hiStep = steps.find(x => x[1] === current + 1);
+    if (kmh >= lo - 5 && (!hiStep || kmh < hiStep[0] + 5)) return current;
+  }
+  return want;
 }
