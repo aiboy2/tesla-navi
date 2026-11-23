@@ -50,6 +50,14 @@ body.nav #map{left:var(--pw)}
 .dot.bad{background:var(--warn)}
 #prog{height:8px;border-radius:4px;background:var(--card2);overflow:hidden}
 #progFill{height:100%;width:0;background:var(--turn);transition:width .5s}
+/* 간단히 보기: 왼쪽 칸 대신 지도 위 작은 카드 (회전 안내 + 남은 거리), 지도는 전체 화면 */
+body.nav.compact #map{left:0}
+body.nav.compact #panel{top:12px;left:12px;bottom:auto;width:min(360px,calc(100% - 96px));border-radius:16px}
+body.nav.compact #infoBox{display:none}
+body.nav.compact #sumRow{border-bottom:0}
+body.nav.compact #roadName,body.nav.compact #toast{left:50%}
+#btnFold{width:44px;height:44px;border-radius:12px;background:var(--card2);display:flex;align-items:center;justify-content:center;flex:none}
+#btnFold svg{width:24px;height:24px}
 #trip{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:auto}
 #trip div{font-size:13px;color:var(--dim)}
 #trip b{display:block;font-size:19px;color:var(--fg)}
@@ -99,7 +107,7 @@ body.nav #searchBar,body.nav #mini{display:none}
 .seg button.sel{background:var(--card);color:var(--fg);box-shadow:0 1px 4px rgba(0,0,0,.15)}
 .scroll{overflow:auto;display:flex;flex-direction:column;gap:10px;flex:1}
 
-#toast{position:absolute;left:50%;transform:translateX(-50%);top:16px;z-index:20;background:rgba(17,24,39,.92);color:#fff;
+#toast{position:absolute;left:50%;transform:translateX(-50%);bottom:72px;z-index:20;background:rgba(17,24,39,.92);color:#fff;
   padding:12px 20px;border-radius:14px;font-size:18px;max-width:80%;text-align:center}
 body.nav #toast{left:calc(var(--pw) + (100% - var(--pw)) / 2)}
 </style>
@@ -127,6 +135,7 @@ try {
     <div><div class="big" id="remain">-</div><div class="sm" id="remainTime"></div></div>
     <div><div class="big" id="eta">-</div><div class="sm">도착 예정</div></div>
     <button id="btnStop">안내 종료</button>
+    <button id="btnFold" aria-label="접기/펼치기"></button>
   </div>
   <div id="infoBox">
     <div class="clock"><b class="clockT">--:--</b><span class="clockD"></span></div>
@@ -179,7 +188,7 @@ try {
     <div class="row"><button class="gbtn" id="voiceTest">음성 테스트</button><button class="gbtn" id="clearRecent">최근 목적지 지우기</button></div>
     <div class="sec">실험 (비교 테스트용, 바꾸면 새로고침됨)</div>
     <div class="note">지도 터치 방식</div>
-    <div class="seg" data-set="nav.gesture" data-reload="1"><button data-v="app">앱 처리 (기존)</button><button data-v="kakao">카카오 기본</button><button data-v="kakao-mobile">카카오 + 모바일 모드</button></div>
+    <div class="seg" data-set="nav.gesture" data-reload="1"><button data-v="auto">자동</button><button data-v="app">앱 처리</button><button data-v="kakao">카카오 기본</button><button data-v="kakao-mobile">카카오+모바일</button></div>
     <div class="note">내 위치 따라가기</div>
     <div class="seg" data-set="nav.followMode"><button data-v="smooth">부드럽게 (매 프레임)</button><button data-v="step">1초 단위 (기존)</button></div>
     <div class="note">
@@ -198,7 +207,7 @@ try {
 <script type="module">
 import * as N from './nav-core.js';
 
-const VERSION = 'p1-2026-11-23.1';
+const VERSION = 'p1-2026-11-23.2';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
@@ -224,6 +233,8 @@ const ICONS = {
   gear:    '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>',
   voiceOn: '<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
   voiceOff:'<path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9l5 6M22 9l-5 6"/>',
+  chevUp:  '<path d="M6 15l6-6 6 6"/>',
+  chevDown:'<path d="M6 9l6 6 6-6"/>',
   pin:     '<path d="M12 2C7.6 2 4 5.4 4 9.8 4 15.5 12 22 12 22s8-6.5 8-12.2C20 5.4 16.4 2 12 2z"/><circle cx="12" cy="9.5" r="3"/>'
 };
 const icon = name => '<svg viewBox="0 0 24 24" ' + S + '>' + (ICONS[name] || ICONS.straight) + '</svg>';
@@ -240,7 +251,9 @@ let map, meOverlay, meEl, destOverlay, routeLines = [];
 let pos = null, lastHeading = 0, follow = true;
 let route = null, dest = null, segHint = 0, navigating = false, routing = false, lastP = null;
 let voiceOn = ls.get('nav.voice', true);
-const gestureMode = ls.get('nav.gesture', 'app');
+// 지도 터치 방식: 자동이면 휴대폰은 카카오 자체 조작(관성 스크롤 등), 테슬라(데스크톱으로 인식)는 앱 처리
+const gestureSetting = ls.get('nav.gesture', 'auto');
+const gestureMode = gestureSetting !== 'auto' ? gestureSetting : (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'kakao' : 'app');
 let followMode = ls.get('nav.followMode', 'smooth');
 const smoother = N.createSmoother();
 const monitor = N.createRerouteMonitor({ threshold: 50, holdMs: 5000, cooldownMs: 20000 });
@@ -330,6 +343,14 @@ function setFollow(on) {
   if (on) { const d = smoother.at(Date.now()); if (d) map.setCenter(new kakao.maps.LatLng(d.lat, d.lng)); }
 }
 $('recenter').onclick = () => { manualZoomAt = 0; setFollow(true); };
+// 왼쪽 칸 접기/펼치기 (기본: 접힘 -- 2026-11-23 사용자 "왼쪽 칸이 너무 큼")
+let compact = ls.get('nav.compact', true);
+function paintFold() {
+  document.body.classList.toggle('compact', compact);
+  $('btnFold').innerHTML = icon(compact ? 'chevDown' : 'chevUp');
+}
+$('btnFold').onclick = () => { compact = !compact; ls.set('nav.compact', compact); paintFold(); setNavLayout(navigating); };
+paintFold();
 // 왼쪽 칸이 생기거나 없어지면 지도 크기가 바뀜 -> 카카오에 알려야 함
 function setNavLayout(on) {
   document.body.classList.toggle('nav', on); show('panel', on);
@@ -343,7 +364,7 @@ function setNavLayout(on) {
 function gestures(el) {
   const pts = new Map();     // 닿아 있는 손가락: id -> {x, y} (지도 영역 기준 좌표)
   let g = null;              // 진행 중 제스처: f0(원래 화면의 기준점), f1(지금 손가락 기준점), s(배율), base/d0(핀치 기준)
-  let settleTm = 0, origin = { x: 0, y: 0 };
+  let settleTm = 0, origin = { x: 0, y: 0 }, inertia = 0;
   const W = () => el.clientWidth, H = () => el.clientHeight;
   const focus = () => {
     const a = [...pts.values()];
@@ -376,9 +397,33 @@ function gestures(el) {
     const dp = smoother.at(Date.now());
     if (follow && dp) map.setCenter(new kakao.maps.LatLng(dp.lat, dp.lng)); else map.setCenter(c);
   }
+  // 멀리 끌면 처음 그려 둔 범위 밖이 비어 보임 -> 일정 거리마다 지금 보이는 곳으로 지도를 다시 그려 채움
+  // (확대 배율이 1일 때만. 지도 다시 그리기와 transform 초기화를 같은 프레임에 해서 화면은 그대로)
+  function reanchor() {
+    if (!g || g.s !== 1) return;
+    const tx = g.f1.x - g.f0.x, ty = g.f1.y - g.f0.y;
+    if (Math.hypot(tx, ty) < Math.min(W(), H()) * 0.35) return;
+    map.setCenter(map.getProjection().coordsFromContainerPoint(new kakao.maps.Point(W() / 2 - tx, H() / 2 - ty)));
+    g.f0 = { x: g.f1.x, y: g.f1.y };
+  }
+  // 손을 뗄 때의 속도로 계속 미끄러지다 서서히 멈춤 (관성)
+  function glide() {
+    let last = performance.now();
+    const step = t => {
+      if (!g) { inertia = 0; return; }
+      const dt = Math.min(50, t - last); last = t;
+      g.f1 = { x: g.f1.x + g.vx * dt, y: g.f1.y + g.vy * dt };
+      const k = Math.exp(-dt / 325); g.vx *= k; g.vy *= k;
+      lastTouch = Date.now(); reanchor(); paint(false);
+      if (Math.hypot(g.vx, g.vy) < 0.02) { inertia = 0; commit(); return; }
+      inertia = requestAnimationFrame(step);
+    };
+    inertia = requestAnimationFrame(step);
+  }
   function finish() {
     if (!g) return;
     if (!g.moved && g.s === 1) { g = null; el.style.transform = ''; return; }
+    if (g.s === 1 && !g.pinched && performance.now() - (g.lt || 0) < 80 && Math.hypot(g.vx || 0, g.vy || 0) > 0.25) { glide(); return; }
     // 배율을 지도 단계(2배 단위)로 맞춤. 레벨 1~14 범위
     const lv = map.getLevel();
     let k = Math.round(Math.log2(g.s));
@@ -388,6 +433,7 @@ function gestures(el) {
     settleTm = setTimeout(commit, 160);
   }
   function down(id, x, y) {
+    if (inertia) { cancelAnimationFrame(inertia); inertia = 0; commit(); }   // 미끄러지는 중 다시 잡으면 그 자리에서 멈춤
     if (settleTm) commit();
     if (!pts.size) { const r = el.getBoundingClientRect(); origin = { x: r.left, y: r.top }; }
     pts.set(id, { x: x - origin.x, y: y - origin.y }); touching = pts.size; lastTouch = Date.now();
@@ -400,9 +446,14 @@ function gestures(el) {
     if (pts.size === 1) {
       if (!g.moved && Math.hypot(f.x - g.start.x, f.y - g.start.y) < 10) return;   // 탭은 무시
       if (!g.moved && follow) { setFollow(false); g.f0 = { x: g.start.x, y: g.start.y }; g.f1 = { x: g.start.x, y: g.start.y }; }
+      // 손가락 속도 (px/ms, 최근 값에 가중치) -> 관성에 사용
+      const now = performance.now();
+      if (g.lt) { const dt = now - g.lt; if (dt > 0) { const k = Math.min(1, dt / 40); g.vx = (g.vx || 0) * (1 - k) + (f.x - g.f1.x) / dt * k; g.vy = (g.vy || 0) * (1 - k) + (f.y - g.f1.y) / dt * k; } }
+      g.lt = now;
       g.moved = true; g.f1 = { x: f.x, y: f.y };
+      reanchor();
     } else {
-      g.moved = true;
+      g.moved = true; g.pinched = true;
       if (g.d0 > 0) g.s = Math.max(1 / 16, Math.min(16, g.base * f.d / g.d0));
       if (!follow) g.f1 = { x: f.x, y: f.y };
     }
