@@ -228,9 +228,10 @@ try {
 
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=a53568cf2b599d80652c79eba7b6a5ca&libraries=services&autoload=false" onerror="window.__sdkError=true"></script>
 <script type="module">
-import * as N from './nav-core.js';
+// 버전을 붙여 불러옴: 테슬라 브라우저가 nav-core.js를 캐시해 새 화면 + 옛 계산 파일이 섞이는 문제 방지 (2026-11-23 실차 "N.buildRoutes is not a function")
+import * as N from './nav-core.js?v=p1-2026-11-23.5';
 
-const VERSION = 'p1-2026-11-23.4';
+const VERSION = 'p1-2026-11-23.5';
 const DIRECTIONS_URL = 'https://apis-navi.kakaomobility.com/v1/directions';
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);

@@ -27,6 +27,9 @@ console.log('[정적 검사: 위치는 카카오로만]');
   check('화살표·기호·이모지 글자 미사용', glyphs.length === 0, [...new Set(glyphs)]);
   // 테슬라 브라우저에서 카카오 기본 터치 조작이 안 됨 (2026-11-17 실차) -> 앱이 직접 처리하는 구조 유지
   check('지도 조작을 앱이 직접 처리 (카카오 기본 끔 + touch-action none)', /setDraggable\(false\)/.test(HTML) && /#map\{[^}]*touch-action:none/.test(HTML));
+  // nav-core.js 캐시 방지: 불러오는 주소의 ?v= 가 VERSION과 같아야 함 (배포 때 같이 올릴 것)
+  const ver = (HTML.match(/const VERSION = '([^']+)'/) || [])[1], imp = (HTML.match(/from '\.\/nav-core\.js\?v=([^']+)'/) || [])[1];
+  check('nav-core.js 불러오기에 VERSION 붙음', ver && imp === ver, { ver, imp });
   check('REST 키를 코드에 하드코딩하지 않음', !/KakaoAK [0-9a-f]{32}/i.test(HTML));
   // 저장소 추적 파일 전체에서 32자리 16진수(카카오 키 형식)는 공개용 JS 키와 테스트용 가짜 키만 허용
   const { execSync } = await import('node:child_process');

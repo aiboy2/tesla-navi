@@ -9,6 +9,7 @@ description: 변경 사항을 검증하고 GitHub Pages에 배포한다 (VERSION
 
 1. **VERSION 올리기** — `index.html`의 `var VERSION = 'p0-YYYY-MM-DD.N'`
    - 오늘 날짜(절대 날짜)로, 같은 날이면 N을 1 증가. Phase가 바뀌면 접두어도 변경(p1-…)
+   - `import * as N from './nav-core.js?v=…'` 의 버전도 같은 값으로 (테슬라 브라우저 캐시 방지, `npm test`가 검사)
 2. **자동 검증** — `npm test` (없으면 먼저 `npm install`). 전부 통과해야 진행
    - 새/변경 동작에 대한 테스트가 `tests/run.mjs`에 있는지 확인, 없으면 추가
 3. **PROGRESS.md 갱신** — 현재 상태의 페이지 버전, 다음 할 일(사용자가 실측할 항목), 결정 기록
